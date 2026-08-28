@@ -22,6 +22,10 @@ if [[ "$FOUND_PORT" -eq 0 && "$PORT" -eq 3000 ]] && command -v lsof >/dev/null 2
   read -r
   exit 1
 fi
+echo "SnapTaskを http://localhost:$PORT/ で起動します。"
+if command -v open >/dev/null 2>&1; then
+  (sleep 1; open "http://localhost:$PORT/") &
+fi
 if command -v pnpm >/dev/null 2>&1; then
   pnpm dev -- --port "$PORT"
 elif command -v npm >/dev/null 2>&1; then
