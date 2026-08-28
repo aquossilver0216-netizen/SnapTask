@@ -11,6 +11,8 @@
 - **Gemma（Mac内）**：Bionic / LM StudioのDeveloper画面で `http://127.0.0.1:1234/v1` を起動します。追加画面の「Gemma接続を確認」で事前チェックできます。
 - **Gemini API**：`.env.local` に `GEMINI_API_KEY=...` を設定して、画面の「Gemini API」に切り替えます。キーはブラウザへ送られません。
 
+公開環境で `GEMINI_API_KEY` が設定されている場合は、初回表示時にGemini APIを自動選択します。ローカル開発ではGemmaを選び直せます。写真は1枚12MB以下、最大12枚まで読み込めます。
+
 Gemini APIの写真解析は、予想外の費用を防ぐためこのMVPでは1端末あたり月20枚で停止します。Gemma（Mac内）はこの上限の対象外です。
 
 課題と単語帳は端末のlocalStorageに保存されます。あとで大会向けにGeminiへ切り替える場合も、画面の選択とサーバー側ルートはそのまま使えます。

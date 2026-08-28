@@ -25,4 +25,9 @@ const api = await fetch(`${base}/api/parse`, { method: 'POST', headers: { 'conte
 const payload = await api.json();
 if (api.status !== 400 || payload.error !== '写真がありません') throw new Error(`API validation: ${api.status}`);
 console.log('✓ API入力バリデーション');
+
+const malformed = await fetch(`${base}/api/parse`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ images: [null, {}, { content: 123 }] }) });
+const malformedPayload = await malformed.json();
+if (malformed.status !== 400 || malformedPayload.error !== '写真がありません') throw new Error(`画像入力バリデーション: ${malformed.status}`);
+console.log('✓ 画像入力バリデーション');
 console.log(`SnapTask smoke test passed: ${base}`);
