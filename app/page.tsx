@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 
 type Task = { id: string; title: string; subject: string; dueDate: string; body: string; done: boolean };
 type Vocab = { id: string; term: string; meaning: string; subject: string };
@@ -28,8 +28,8 @@ function formatDue(value: string) { if (!value) return '締切未設定'; const 
 
 export default function Home() {
   const [screen, setScreen] = useState<Screen>('home');
-  const [tasks, setTasks] = useState<Task[]>(() => { if (typeof window === 'undefined') return starterTasks; try { const saved = JSON.parse(localStorage.getItem('snaptask-tasks') ?? 'null'); return Array.isArray(saved) ? saved : starterTasks; } catch { return starterTasks; } });
-  const [vocab, setVocab] = useState<Vocab[]>(() => { if (typeof window === 'undefined') return starterVocab; try { const saved = JSON.parse(localStorage.getItem('snaptask-vocab') ?? 'null'); return Array.isArray(saved) ? saved.map(item => ({ id: String(item.id ?? newId('vocab')), term: String(item.term ?? ''), meaning: String(item.meaning ?? ''), subject: String(item.subject ?? item.deck ?? '英語') })) : starterVocab; } catch { return starterVocab; } });
+  const [tasks, setTasks] = useState<Task[]>(starterTasks);
+  const [vocab, setVocab] = useState<Vocab[]>(starterVocab);
   const [provider, setProvider] = useState<Provider>('gemma');
   const [reading, setReading] = useState(false); const [message, setMessage] = useState(''); const [fileName, setFileName] = useState(''); const [memoryReading, setMemoryReading] = useState(false); const [memoryMessage, setMemoryMessage] = useState(''); const [memoryFileName, setMemoryFileName] = useState('');
   const [draftTasks, setDraftTasks] = useState<Task[]>([]); const [subject, setSubject] = useState('すべて'); const [showDone, setShowDone] = useState(false);
@@ -41,6 +41,8 @@ export default function Home() {
   const subjects = useMemo(() => ['すべて', ...Array.from(new Set(tasks.map(task => task.subject).filter(Boolean)))], [tasks]);
   const decks = useMemo(() => Array.from(new Set(vocab.map(item => item.subject))), [vocab]);
   const deckWords = useMemo(() => vocab.filter(item => item.subject === deck), [vocab, deck]);
+
+  useEffect(() => { const timer = window.setTimeout(() => { try { const savedTasks = JSON.parse(localStorage.getItem('snaptask-tasks') ?? 'null'); if (Array.isArray(savedTasks)) setTasks(savedTasks); const savedWords = JSON.parse(localStorage.getItem('snaptask-vocab') ?? 'null'); if (Array.isArray(savedWords)) setVocab(savedWords.map(item => ({ id: String(item.id ?? newId('vocab')), term: String(item.term ?? ''), meaning: String(item.meaning ?? ''), subject: String(item.subject ?? item.deck ?? '英語') }))); } catch { /* use starter data */ } }, 0); return () => window.clearTimeout(timer); }, []);
 
   async function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []); event.target.value = ''; if (!files.length) return; setFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setReading(true); setMessage(''); setDraftTasks([]);
