@@ -20,7 +20,7 @@ function cleanTasks(value: unknown) {
 
 async function callVision(url: string, model: string, images: Array<{ content: string }>, instruction: string, headers: Record<string, string> = {}) {
   const content = [{ type: 'text', text: instruction }, ...images.map(image => ({ type: 'image_url', image_url: { url: `data:image/png;base64,${image.content}` } }))];
-  const response = await fetch(`${url.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ model, temperature: 0, max_tokens: 4096, messages: [{ role: 'user', content }] }) });
+  const response = await fetch(`${url.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ model, temperature: 0, max_tokens: 4096, messages: [{ role: 'user', content }] }), signal: AbortSignal.timeout(45_000) });
   if (!response.ok) throw new Error(await response.text());
   const result = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   return parseJson(result.choices?.[0]?.message?.content ?? '') ?? {};
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       if (!key) return NextResponse.json({ error: 'GEMINI_API_KEYが未設定です' }, { status: 503 });
       const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
       const parts = [{ text: instruction }, ...images.map(image => ({ inline_data: { mime_type: 'image/png', data: image.content } }))];
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } }) });
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } }), signal: AbortSignal.timeout(45_000) });
       if (!response.ok) throw new Error(await response.text());
       const result = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
       const parsed = parseJson(result.candidates?.[0]?.content?.parts?.[0]?.text ?? '');
