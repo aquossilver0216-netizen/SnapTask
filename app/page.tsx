@@ -196,5 +196,6 @@ export default function Home() {
     <nav className="snap-nav"><button className={screen === 'home' ? 'active' : ''} onClick={() => setScreen('home')}><span>⌂</span>ホーム</button><button className={screen === 'add' ? 'active' : ''} onClick={() => setScreen('add')}><span>＋</span>追加</button><button className={screen === 'english' ? 'active' : ''} onClick={() => setScreen('english')}><span>暗</span>暗記</button><button className={screen === 'share' ? 'active' : ''} onClick={() => { setScreen('share'); setShareDeck(decks[0] ?? ''); setShareMessage(''); }}><span>↗</span>共有</button></nav>
     {screen === 'english' && memoryMode !== 'flash' && <button className="flash-launch" onClick={startFlash} disabled={!deckWords.length}>一周学習をはじめる</button>}
     {screen === 'english' && memoryMode === 'flash' && <FlashStudyPanel cards={deckWords} index={flashIndex} known={flashKnown} revealed={flashRevealed} finished={flashFinished} onReveal={() => setFlashRevealed(true)} onAnswer={answerFlash} onRestart={startFlash} onClose={() => { setMemoryMode('list'); setFlashFinished(false); }} />}
+    {provider === 'api' && <div className="api-quota-badge">Gemini API：今月あと{apiRemaining}枚</div>}
   </main>;
 }
