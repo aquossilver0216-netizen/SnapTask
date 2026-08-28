@@ -55,3 +55,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ tasks: Array.from(unique.values()) });
   } catch (error) { return NextResponse.json({ error: provider === 'gemma' ? 'Gemmaに接続できませんでした。Bionic / LM Studioで http://127.0.0.1:1234/v1 を起動してください。' : 'APIで解析できませんでした。GEMINI_API_KEYとモデル設定を確認してください。', detail: error instanceof Error ? error.message.slice(0, 400) : '' }, { status: 503 }); }
 }
+
+// 公開後の接続確認用。秘密情報やキーの値は返さない。
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    providers: { gemma: true, api: Boolean(process.env.GEMINI_API_KEY) },
+    model: { gemma: process.env.LOCAL_GEMMA_MODEL || 'google/gemma-4-e4b', api: process.env.GEMINI_MODEL || 'gemini-2.5-flash' },
+  });
+}

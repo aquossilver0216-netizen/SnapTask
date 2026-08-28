@@ -11,6 +11,11 @@ for (const [label, path, expected] of checks) {
   console.log(`✓ ${label}`);
 }
 
+const health = await fetch(`${base}/api/parse`);
+const healthPayload = await health.json();
+if (health.status !== 200 || healthPayload.ok !== true || !healthPayload.providers) throw new Error(`API health: ${health.status}`);
+console.log('✓ AIルートヘルスチェック');
+
 const api = await fetch(`${base}/api/parse`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
 const payload = await api.json();
 if (api.status !== 400 || payload.error !== '写真がありません') throw new Error(`API validation: ${api.status}`);
