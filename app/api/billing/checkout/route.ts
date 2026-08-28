@@ -6,12 +6,13 @@ import { NextResponse } from 'next/server';
  */
 export async function POST() {
   const secretKey = process.env.STRIPE_SECRET_KEY;
-  const priceId = process.env.STRIPE_PRICE_ID_PREMIUM;
+  const liveMode = process.env.STRIPE_TEST_MODE === 'false';
+  // 本番とテストでPrice IDも分離し、環境をまたいだ設定ミスを防ぐ。
+  const priceId = liveMode ? process.env.STRIPE_PRICE_ID_PREMIUM_LIVE : process.env.STRIPE_PRICE_ID_PREMIUM;
   const appUrl = process.env.APP_URL ?? 'https://snap-task-xi.vercel.app';
   if (!secretKey || !priceId) return NextResponse.json({ error: '決済設定が未完了です。Stripeの環境変数を設定してください。' }, { status: 503 });
   // 誤課金防止のため、モードとキーの接頭辞を必ず一致させる。
   // 未設定・true はテスト、false にした場合だけ本番キーを許可する。
-  const liveMode = process.env.STRIPE_TEST_MODE === 'false';
   const expectedPrefix = liveMode ? 'sk_live_' : 'sk_test_';
   if (!secretKey.startsWith(expectedPrefix)) {
     return NextResponse.json({ error: liveMode ? '本番モードにはStripeのsk_live_キーを設定してください。' : '現在はテストモードです。Stripeのsk_test_キーを設定してください。' }, { status: 503 });
