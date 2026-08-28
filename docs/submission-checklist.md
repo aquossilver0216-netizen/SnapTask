@@ -2,6 +2,8 @@
 
 ## 公開前
 
+公開先の具体的な設定は [`docs/release.md`](release.md) を参照する。
+
 - [ ] 一般ユーザーがアクセスできる公開URLを用意する
 - [ ] スマートフォン（Safari / Chrome）でトップページを開く
 - [ ] `pnpm run build` が成功する

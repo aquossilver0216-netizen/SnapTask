@@ -1,0 +1,57 @@
+# SnapTask｜公開手順
+
+テック甲子園の提出用に、公開URLを用意するときの手順です。公開先はVercelなどのNext.js対応ホスティングを想定しています。
+
+## 1. 公開前に確認
+
+```bash
+pnpm run lint
+pnpm run build
+pnpm test:smoke http://localhost:3000
+```
+
+起動ポートが3000以外なら、表示されたURLへ置き換えます。
+
+## 2. Vercelへ登録
+
+1. GitHubへこのリポジトリをpushする。
+2. VercelでリポジトリをImportする。
+3. Build Commandは空欄（`package.json`の`build`を使用）にする。
+4. 次の環境変数をProductionへ登録する。
+
+| 変数 | 公開環境の値 |
+| --- | --- |
+| `GEMINI_API_KEY` | Google AI Studioで発行したキー |
+| `GEMINI_MODEL` | `gemini-2.5-flash`（必要に応じて変更） |
+
+`LOCAL_GEMMA_BASE_URL`は公開サーバーから開発Macへ接続できないため、公開環境には設定しません。公開版の写真解析は画面で「Gemini API」を選びます。Gemmaは開発・オフラインデモ用です。
+
+## 3. 公開後の確認
+
+公開URLで次を確認します。
+
+```bash
+pnpm test:smoke https://公開URL
+```
+
+ブラウザで `https://公開URL/api/parse` を開き、`ok: true` と `providers.api: true` を確認します。キーの値そのものは表示されません。
+
+次にスマートフォンで、写真追加→読み取り結果の編集→保存→完了チェック→暗記テスト→日別カレンダーの順に一度通します。Gemini APIを使わない場合は、サンプルボタンで同じ導線を確認できます。
+
+## 4. 課金・費用の安全策
+
+- APIキーをソースコード、GitHub、スクリーンショットへ書かない。
+- Google Cloud / AI Studio側で予算通知と利用上限を設定する。
+- Vercel側にも利用量・請求アラートを設定する。
+- 提出デモでは、必要な写真だけを少数枚選ぶ。
+- 公開後に料金と無料枠の条件が変わっていないか、提出直前に公式ページで再確認する。
+
+## 5. 提出物に記載する情報
+
+- 公開URL
+- 対応端末（スマートフォンSafari / Chrome）
+- AI処理の選択肢（Gemmaローカル / Gemini API）
+- 写真は確認・編集してから保存する設計
+- データは端末のlocalStorageに保存され、バックアップ保存・復元ができること
+- AIが利用できない場合のサンプル導線
+

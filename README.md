@@ -14,6 +14,7 @@
 課題と単語帳は端末のlocalStorageに保存されます。あとで大会向けにGeminiへ切り替える場合も、画面の選択とサーバー側ルートはそのまま使えます。
 
 提出前の公開・デモ・AI設定チェックは [`docs/submission-checklist.md`](docs/submission-checklist.md) を確認してください。
+公開先の設定と本番Gemini APIへの切り替えは [`docs/release.md`](docs/release.md) にまとめています。
 
 ### 公開前チェック
 
