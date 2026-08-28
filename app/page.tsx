@@ -73,13 +73,14 @@ async function toPng(file: File): Promise<File> {
   }
   const width = bitmap?.width ?? image?.naturalWidth ?? 0;
   const height = bitmap?.height ?? image?.naturalHeight ?? 0;
-  if (!width || !height) throw new Error('画像サイズを取得できません');
+  const sourceImage: CanvasImageSource | null = bitmap ?? image;
+  if (!sourceImage || !width || !height) throw new Error('画像サイズを取得できません');
   const scale = Math.min(1, 2200 / Math.max(width, height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(width * scale)); canvas.height = Math.max(1, Math.round(height * scale));
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('画像を変換できません');
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(bitmap ?? image, 0, 0, canvas.width, canvas.height); bitmap?.close();
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(sourceImage, 0, 0, canvas.width, canvas.height); bitmap?.close();
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('PNG変換に失敗しました')), 'image/png'));
   return new File([blob], file.name.replace(/\.(heic|heif|jpe?g)$/i, '.png'), { type: 'image/png' });
 }
