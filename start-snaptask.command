@@ -6,14 +6,21 @@ PNPM_DIR="/Users/torikunn/.cache/codex-runtimes/codex-primary-runtime/dependenci
 export PATH="$NODE_DIR:$PNPM_DIR:$PATH"
 cd "$PROJECT_DIR"
 PORT=3000
+FOUND_PORT=0
 if command -v lsof >/dev/null 2>&1; then
   # Tanngoや古い開発サーバーが起動中でも、空いているポートで続ける。
-  for CANDIDATE in {3000..3010}; do
+  for CANDIDATE in {3000..3020}; do
     if ! lsof -iTCP:"$CANDIDATE" -sTCP:LISTEN -n -P >/dev/null 2>&1; then
       PORT="$CANDIDATE"
+      FOUND_PORT=1
       break
     fi
   done
+fi
+if [[ "$FOUND_PORT" -eq 0 && "$PORT" -eq 3000 ]] && command -v lsof >/dev/null 2>&1; then
+  echo "空いているポートが見つかりませんでした。起動中の開発サーバーを閉じてから、もう一度実行してください。"
+  read -r
+  exit 1
 fi
 if command -v pnpm >/dev/null 2>&1; then
   pnpm dev -- --port "$PORT"
