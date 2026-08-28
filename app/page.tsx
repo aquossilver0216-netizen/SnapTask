@@ -84,6 +84,10 @@ function FlashStudyPanel({ cards, index, known, revealed, finished, onReveal, on
   </div>;
 }
 
+function MoveCardPanel({ cards, decks, onMove, onClose }: { cards: Vocab[]; decks: string[]; onMove: (id: string, subject: string) => void; onClose: () => void }) {
+  return <div className="move-panel" role="dialog" aria-label="カードを整理"><button className="flash-close" onClick={onClose}>× 閉じる</button><p className="kicker">ORGANIZE</p><h2>カードを単語帳に整理</h2><p className="move-intro">教科を選ぶと、カードがその単語帳へ移動します。</p><div className="move-list">{cards.length ? cards.map(card => <div className="move-row" key={card.id}><div><b>{card.term}</b><small>{card.meaning}</small></div><select aria-label={`${card.term}の単語帳`} value={card.subject} onChange={event => onMove(card.id, event.target.value)}>{decks.map(item => <option key={item} value={item}>{item}</option>)}</select></div>) : <div className="empty-state"><b>整理できるカードがありません</b><span>先に暗記カードを追加しよう。</span></div>}</div></div>;
+}
+
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [screen, setScreen] = useState<Screen>('home');
@@ -97,6 +101,7 @@ export default function Home() {
   const [showGuide, setShowGuide] = useState(true); const [backupMessage, setBackupMessage] = useState('');
   const [manualTitle, setManualTitle] = useState(''); const [manualSubject, setManualSubject] = useState(''); const [manualDue, setManualDue] = useState(''); const [manualBody, setManualBody] = useState(''); const [manualMessage, setManualMessage] = useState('');
   const [shareDeck, setShareDeck] = useState(''); const [shareMessage, setShareMessage] = useState('');
+  const [manageOpen, setManageOpen] = useState(false);
 
   function saveTasks(next: Task[]) { setTasks(next); localStorage.setItem('snaptask-tasks', JSON.stringify(next)); }
   function saveVocab(next: Vocab[]) { setVocab(next); localStorage.setItem('snaptask-vocab', JSON.stringify(next)); }
@@ -157,6 +162,7 @@ export default function Home() {
   function toggleTask(id: string) { const target = tasks.find(task => task.id === id); if (!target) return; saveTasks(tasks.map(task => task.id === id ? { ...task, done: !task.done } : task)); recordCompleted(target.done ? -1 : 1); }
   function removeTask(id: string) { const target = tasks.find(task => task.id === id); if (target && window.confirm(`「${target.title}」を削除しますか？`)) saveTasks(tasks.filter(task => task.id !== id)); }
   function removeWord(id: string) { const target = vocab.find(card => card.id === id); if (target && window.confirm(`「${target.term}」を暗記カードから削除しますか？`)) { saveVocab(vocab.filter(card => card.id !== id)); setWrongIds(current => { const next = current.filter(cardId => cardId !== id); localStorage.setItem('snaptask-wrong-cards', JSON.stringify(next)); return next; }); } }
+  function moveWord(id: string, subjectName: string) { const next = vocab.map(card => card.id === id ? { ...card, subject: subjectName } : card); saveVocab(next); if (shareDeck === vocab.find(card => card.id === id)?.subject) setShareDeck(subjectName); }
   function saveEditedTask() { if (!editingTask?.title.trim()) return; saveTasks(tasks.map(task => task.id === editingTask.id ? { ...editingTask, title: editingTask.title.trim(), subject: editingTask.subject.trim() || '教科未設定' } : task)); setEditingTask(null); }
   function changeGoal() { const value = window.prompt('1週間の完了目標（件）', String(weeklyGoal)); const parsed = Number(value); if (Number.isFinite(parsed) && parsed > 0 && parsed <= 99) { setWeeklyGoal(Math.round(parsed)); localStorage.setItem('snaptask-weekly-goal', String(Math.round(parsed))); } }
   function addWord(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!term.trim() || !meaning.trim()) { setEnglishMessage('用語と説明を入力してね。'); return; } saveVocab([...vocab, { id: newId('vocab'), term: term.trim(), meaning: meaning.trim(), subject: deck }]); setTerm(''); setMeaning(''); setEnglishMessage('暗記カードに追加しました！'); }
@@ -197,5 +203,7 @@ export default function Home() {
     {screen === 'english' && memoryMode !== 'flash' && <button className="flash-launch" onClick={startFlash} disabled={!deckWords.length}>一周学習をはじめる</button>}
     {screen === 'english' && memoryMode === 'flash' && <FlashStudyPanel cards={deckWords} index={flashIndex} known={flashKnown} revealed={flashRevealed} finished={flashFinished} onReveal={() => setFlashRevealed(true)} onAnswer={answerFlash} onRestart={startFlash} onClose={() => { setMemoryMode('list'); setFlashFinished(false); }} />}
     {provider === 'api' && <div className="api-quota-badge">Gemini API：今月あと{apiRemaining}枚</div>}
+    {screen === 'english' && !manageOpen && memoryMode !== 'flash' && <button className="organize-launch" onClick={() => setManageOpen(true)} disabled={!deckWords.length}>カードを整理</button>}
+    {screen === 'english' && manageOpen && <MoveCardPanel cards={deckWords} decks={decks} onMove={moveWord} onClose={() => setManageOpen(false)} />}
   </main>;
 }
