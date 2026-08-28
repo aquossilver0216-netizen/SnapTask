@@ -49,6 +49,7 @@ async function toPng(file: File): Promise<File> {
 function dataUrl(file: File) { return new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); }); }
 
 export default function Home() {
+  const [mounted, setMounted] = useState(false);
   const [screen, setScreen] = useState<Screen>('home');
   const [tasks, setTasks] = useState<Task[]>(starterTasks); const [vocab, setVocab] = useState<Vocab[]>(starterVocab); const [activity, setActivity] = useState<Activity>({});
   const [todayKey, setTodayKey] = useState(''); const [weeklyGoal, setWeeklyGoal] = useState(5); const [provider, setProvider] = useState<Provider>('gemma');
@@ -75,6 +76,7 @@ export default function Home() {
         const savedGoal = Number(localStorage.getItem('snaptask-weekly-goal')); if (Number.isFinite(savedGoal) && savedGoal > 0) setWeeklyGoal(savedGoal);
         setShowGuide(localStorage.getItem('snaptask-guide-seen') !== '1');
       } catch { /* use starter data */ }
+      setMounted(true);
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -120,6 +122,9 @@ export default function Home() {
   function addManualTask(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!manualTitle.trim()) { setManualMessage('課題名を入力してください。'); return; } saveTasks([...tasks, { id: newId('task'), title: manualTitle.trim(), subject: manualSubject.trim() || '教科未設定', dueDate: manualDue, body: manualBody.trim(), done: false }]); setManualTitle(''); setManualSubject(''); setManualDue(''); setManualBody(''); setManualMessage(''); setMessage('課題を追加しました！'); setScreen('home'); }
   function startQuiz() { if (quizQuestions.length < 2) { setEnglishMessage('4択テストには2件以上のカードが必要です。'); return; } setQuizIndex(0); setQuizScore(0); setQuizSelected(null); setQuizFinished(false); setMemoryMode('quiz'); }
   function answerQuiz(value: string) { if (quizSelected || !quizQuestion) return; setQuizSelected(value); const correct = value === quizQuestion.meaning; if (correct) { setQuizScore(score => score + 1); setWrongIds(current => { const next = current.filter(id => id !== quizQuestion.id); localStorage.setItem('snaptask-wrong-cards', JSON.stringify(next)); return next; }); } else { setWrongIds(current => { const next = Array.from(new Set([...current, quizQuestion.id])); localStorage.setItem('snaptask-wrong-cards', JSON.stringify(next)); return next; }); } window.setTimeout(() => { if (quizIndex + 1 >= quizQuestions.length) setQuizFinished(true); else { setQuizIndex(index => index + 1); setQuizSelected(null); } }, 650); }
+
+  // Serverとブラウザの初回HTMLを同じにして、保存データや日付によるHydration不一致を防ぐ。
+  if (!mounted) return <main className="snap-shell app-loading"><span className="brand-dot">S</span><b>SnapTaskを準備中…</b></main>;
 
   return <main className="snap-shell">
     <header className="snap-header"><button className="snap-brand" onClick={() => setScreen('home')}><span className="brand-dot">S</span><span><b>SnapTask</b><small>高校生のための提出物管理</small></span></button><button className="header-add" onClick={() => setScreen('add')}>＋ 写真を追加</button></header>
