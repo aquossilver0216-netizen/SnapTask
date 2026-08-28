@@ -16,6 +16,11 @@ const healthPayload = await health.json();
 if (health.status !== 200 || healthPayload.ok !== true || !healthPayload.providers) throw new Error(`API health: ${health.status}`);
 console.log('✓ AIルートヘルスチェック');
 
+const gemmaCheck = await fetch(`${base}/api/parse?check=gemma`);
+const gemmaPayload = await gemmaCheck.json();
+if (![200, 503].includes(gemmaCheck.status) || gemmaPayload.provider !== 'gemma' || typeof gemmaPayload.ok !== 'boolean') throw new Error(`Gemma check: ${gemmaCheck.status}`);
+console.log(`✓ Gemma接続確認（${gemmaPayload.ok ? '接続中' : '未接続でも継続可能'}）`);
+
 const api = await fetch(`${base}/api/parse`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
 const payload = await api.json();
 if (api.status !== 400 || payload.error !== '写真がありません') throw new Error(`API validation: ${api.status}`);
