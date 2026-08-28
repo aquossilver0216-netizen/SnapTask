@@ -161,7 +161,7 @@ export default function Home() {
   }, [deckWords, vocab, quizQuestion]);
   const recentDays = useMemo(() => todayKey ? Array.from({ length: 7 }, (_, index) => shiftedDate(todayKey, index - 6)) : [], [todayKey]);
   const weekCompleted = recentDays.reduce((sum, key) => sum + (activity[key]?.completed ?? 0), 0); const progress = Math.min(100, Math.round((weekCompleted / weeklyGoal) * 100));
-  const streak = useMemo(() => { if (!todayKey) return 0; let count = 0; for (let index = 0; index < 30; index += 1) { if ((activity[shiftedDate(todayKey, -index)]?.completed ?? 0) < 1) break; count += 1; } return count; }, [activity, todayKey]);
+  const streak = useMemo(() => { if (!todayKey) return 0; let count = 0; for (let index = 0; index < 30; index += 1) { const day = activity[shiftedDate(todayKey, -index)]; if ((day?.completed ?? 0) + (day?.answered ?? 0) < 1) break; count += 1; } return count; }, [activity, todayKey]);
   const weekEnd = todayKey ? shiftedDate(todayKey, 6) : ''; const dueThisWeek = tasks.filter(task => !task.done && task.dueDate && todayKey && task.dueDate >= todayKey && task.dueDate <= weekEnd).length;
   const activeApiMonth = todayKey ? todayKey.slice(0, 7) : monthKey(new Date()); const activeApiCount = apiUsage.month === activeApiMonth ? apiUsage.count : 0; const apiRemaining = Math.max(0, 20 - activeApiCount);
 
