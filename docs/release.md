@@ -10,6 +10,8 @@ pnpm run build
 pnpm test:smoke http://localhost:3000
 ```
 
+`pnpm run build` は標準の Next.js 本番ビルド（Webpack）を使うため、VercelのNext.js検出と同じ構成で確認できます。
+
 起動ポートが3000以外なら、表示されたURLへ置き換えます。
 
 ## 2. Vercelへ登録
