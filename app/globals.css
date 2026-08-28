@@ -16,3 +16,4 @@
 @media(max-width:560px){.guide-steps small{font-size:8px}.data-tools span{width:100%;margin-right:0}.calendar-detail{gap:7px;flex-wrap:wrap}.calendar-detail b{width:100%;margin-right:0}}
 .snap-stats{grid-template-columns:repeat(4,1fr)}
 @media(max-width:560px){.snap-stats{grid-template-columns:repeat(2,1fr)}}
+.snap-message{display:flex;align-items:center;gap:10px;justify-content:space-between}.snap-message.message-error{padding:10px 12px;border-radius:10px;background:#fff1ed;color:#a64d39}.snap-message.message-error button{flex:0 0 auto;border:1px solid #e4b3a5;border-radius:7px;padding:6px 8px;background:#fff;color:#a64d39;font-size:9px;font-weight:800;cursor:pointer}
