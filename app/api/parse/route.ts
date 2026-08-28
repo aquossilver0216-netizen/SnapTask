@@ -9,6 +9,20 @@ function parseJson(text: string): Record<string, unknown> | null {
   const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
   try { return JSON.parse(clean) as { tasks?: unknown }; } catch { const start = clean.indexOf('{'); const end = clean.lastIndexOf('}'); if (start >= 0 && end > start) { try { return JSON.parse(clean.slice(start, end + 1)) as { tasks?: unknown }; } catch { return null; } } return null; }
 }
+
+function modelContent(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map(part => modelContent(part)).filter(Boolean).join('\n');
+  }
+  if (value && typeof value === 'object') {
+    const row = recordOf(value);
+    if (typeof row.text === 'string') return row.text;
+    if (Array.isArray(row.parts)) return modelContent(row.parts);
+    return JSON.stringify(value);
+  }
+  return '';
+}
 function cleanCards(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.map(item => { const row = recordOf(item); return { front: String(row.front ?? '').trim(), back: String(row.back ?? '').trim(), subject: String(row.subject ?? 'その他').trim() || 'その他' }; }).filter(card => card.front && card.back).slice(0, 120);
@@ -22,12 +36,45 @@ function recordOf(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
 }
 
-async function callVision(url: string, model: string, images: Array<{ content: string }>, instruction: string, headers: Record<string, string> = {}) {
+function gemmaErrorMessage(error: unknown): string {
+  const reason = error instanceof Error ? error.message : String(error);
+  if (/timeout|aborted/i.test(reason)) {
+    return 'Gemmaの解析に時間がかかりすぎました。写真を1〜2枚ずつに分けるか、Bionicのモデルを確認してもう一度試してね。';
+  }
+  if (/cannot handle this data type|process inputs|image|vision/i.test(reason)) {
+    return 'Gemmaが画像を解析できませんでした。Bionic / LM Studioで画像対応モデルを選び、写真をもう一度試してね。';
+  }
+  if (/model.*(not found|does not exist)|no such model/i.test(reason)) {
+    return 'Gemmaのモデルが見つかりません。Developer画面でGemma 4 E4Bを読み込んでね。';
+  }
+  return 'Gemmaに接続できませんでした。Bionic / LM Studioで http://127.0.0.1:1234/v1 を起動してください。';
+}
+
+async function callVision(url: string, model: string, images: Array<{ content: string }>, instruction: string, headers: Record<string, string> = {}, timeoutMs = 45_000) {
+  // Bionic / LM Studioの互換実装にはdetailフィールドを受け付けないものがあるため、最小形式で送る。
   const content = [{ type: 'text', text: instruction }, ...images.map(image => ({ type: 'image_url', image_url: { url: `data:image/png;base64,${image.content}` } }))];
-  const response = await fetch(`${url.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ model, temperature: 0, max_tokens: 4096, messages: [{ role: 'user', content }] }), signal: AbortSignal.timeout(45_000) });
+  const response = await fetch(`${url.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ model, temperature: 0, max_tokens: 4096, messages: [{ role: 'user', content }] }), signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) throw new Error(await response.text());
-  const result = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  return parseJson(result.choices?.[0]?.message?.content ?? '') ?? {};
+  const result = await response.json() as { choices?: Array<{ message?: { content?: unknown }; text?: unknown }> };
+  const choice = result.choices?.[0];
+  return parseJson(modelContent(choice?.message?.content ?? choice?.text)) ?? {};
+}
+
+const defaultLocalModel = 'google/gemma-4-e4b';
+
+async function resolveLocalModel(base: string): Promise<string> {
+  const configured = process.env.LOCAL_GEMMA_MODEL?.trim();
+  if (configured) return configured;
+  try {
+    const response = await fetch(`${base.replace(/\/$/, '')}/models`, { signal: AbortSignal.timeout(3_000) });
+    if (response.ok) {
+      const payload = await response.json() as { data?: Array<{ id?: unknown }> };
+      const available = payload.data?.map(item => typeof item.id === 'string' ? item.id.trim() : '').filter(Boolean) ?? [];
+      const model = available.find(item => /gemma/i.test(item)) || available[0];
+      if (typeof model === 'string') return model.trim();
+    }
+  } catch { /* モデル一覧がないサーバーは既定名で試す */ }
+  return defaultLocalModel;
 }
 
 export async function POST(request: Request) {
@@ -54,14 +101,16 @@ export async function POST(request: Request) {
       const parsed = parseJson(result.candidates?.[0]?.content?.parts?.[0]?.text ?? '');
       tasks.push(...(mode === 'memorize' ? cleanCards(parsed?.cards) : cleanTasks(parsed?.tasks)));
     } else {
-      const base = process.env.LOCAL_GEMMA_BASE_URL || 'http://127.0.0.1:1234/v1'; const model = process.env.LOCAL_GEMMA_MODEL || 'google/gemma-4-e4b';
-      const parsed = await callVision(base, model, images, instruction) as { tasks?: unknown; cards?: unknown };
+      const base = process.env.LOCAL_GEMMA_BASE_URL || 'http://127.0.0.1:1234/v1'; const model = await resolveLocalModel(base);
+      const localKey = process.env.LOCAL_GEMMA_API_KEY?.trim();
+      // ローカル推論はMacの性能や画像枚数によって時間がかかるため、APIより長めに待つ。
+      const parsed = await callVision(base, model, images, instruction, localKey ? { authorization: `Bearer ${localKey}` } : {}, 120_000) as { tasks?: unknown; cards?: unknown };
       tasks.push(...(mode === 'memorize' ? cleanCards(parsed.cards) : cleanTasks(parsed.tasks)));
     }
     if (mode === 'memorize') { const unique = new Map<string, { front: string; back: string; subject: string }>(); for (const card of cleanCards(tasks)) unique.set(`${card.front}|${card.subject}`.toLowerCase(), card); return NextResponse.json({ cards: Array.from(unique.values()) }); }
     const unique = new Map<string, { title: string; subject: string; dueDate: string; body: string }>(); for (const task of cleanTasks(tasks)) unique.set(`${task.title}|${task.subject}`.toLowerCase(), task);
     return NextResponse.json({ tasks: Array.from(unique.values()) });
-  } catch (error) { console.error('SnapTask AI parse failed', { provider, mode, reason: error instanceof Error ? error.message.slice(0, 400) : 'unknown' }); return NextResponse.json({ error: provider === 'gemma' ? 'Gemmaに接続できませんでした。Bionic / LM Studioで http://127.0.0.1:1234/v1 を起動してください。' : 'APIで解析できませんでした。GEMINI_API_KEYとモデル設定を確認してください。' }, { status: 503 }); }
+  } catch (error) { console.error('SnapTask AI parse failed', { provider, mode, reason: error instanceof Error ? error.message.slice(0, 400) : 'unknown' }); return NextResponse.json({ error: provider === 'gemma' ? gemmaErrorMessage(error) : 'APIで解析できませんでした。GEMINI_API_KEYとモデル設定を確認してください。' }, { status: 503 }); }
 }
 
 // 公開後の接続確認用。秘密情報やキーの値は返さない。
@@ -69,11 +118,18 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   if (url.searchParams.get('check') === 'gemma') {
     const base = process.env.LOCAL_GEMMA_BASE_URL || 'http://127.0.0.1:1234/v1';
-    try { const response = await fetch(`${base.replace(/\/$/, '')}/models`, { signal: AbortSignal.timeout(1200) }); return NextResponse.json({ ok: response.ok, provider: 'gemma', message: response.ok ? 'Gemmaに接続できます' : 'Gemmaから応答がありません' }, { status: response.ok ? 200 : 503 }); } catch { return NextResponse.json({ ok: false, provider: 'gemma', message: 'Gemmaに接続できません' }, { status: 503 }); }
+    try {
+      const response = await fetch(`${base.replace(/\/$/, '')}/models`, { signal: AbortSignal.timeout(2_500) });
+      if (!response.ok) return NextResponse.json({ ok: false, provider: 'gemma', message: 'Gemmaから応答がありません' }, { status: 503 });
+      const payload = await response.json().catch(() => null) as { data?: Array<{ id?: unknown }> } | null;
+      const available = payload?.data?.map(item => typeof item.id === 'string' ? item.id.trim() : '').filter(Boolean) ?? [];
+      const model = process.env.LOCAL_GEMMA_MODEL?.trim() || available.find(item => /gemma/i.test(item)) || available[0] || defaultLocalModel;
+      return NextResponse.json({ ok: true, provider: 'gemma', model, message: 'Gemmaに接続できます' });
+    } catch { return NextResponse.json({ ok: false, provider: 'gemma', message: 'Gemmaに接続できません' }, { status: 503 }); }
   }
   return NextResponse.json({
     ok: true,
     providers: { gemma: true, api: Boolean(process.env.GEMINI_API_KEY) },
-    model: { gemma: process.env.LOCAL_GEMMA_MODEL || 'google/gemma-4-e4b', api: process.env.GEMINI_MODEL || 'gemini-2.5-flash' },
+    model: { gemma: process.env.LOCAL_GEMMA_MODEL || defaultLocalModel, api: process.env.GEMINI_MODEL || 'gemini-2.5-flash' },
   });
 }
