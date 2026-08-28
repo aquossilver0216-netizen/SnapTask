@@ -32,6 +32,9 @@ const tutorialSteps = [
 ] as const;
 const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
 const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+const GEMINI_FREE_LIMIT = 20;
+const GEMINI_PREMIUM_LIMIT = 300;
+const PREMIUM_STORAGE_KEY = 'snaptask-premium-v1';
 
 function newId(prefix: string) { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
 function dateKey(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
@@ -51,7 +54,7 @@ function normalizeTasks(value: unknown): Task[] { if (!Array.isArray(value)) ret
 function normalizeVocab(value: unknown): Vocab[] { if (!Array.isArray(value)) return []; return value.map((item, index) => { const row = recordOf(item); return { id: String(row.id ?? `vocab-${index + 1}`), term: String(row.term ?? '').trim(), meaning: String(row.meaning ?? '').trim(), subject: String(row.subject ?? row.deck ?? 'その他').trim() || 'その他' }; }).filter(card => card.term && card.meaning); }
 function normalizeActivity(value: unknown): Activity { if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}; return Object.fromEntries(Object.entries(value).map(([key, raw]) => { const row = recordOf(raw); return [key, { completed: safeCount(row.completed), answered: safeCount(row.answered), wrong: safeCount(row.wrong) }]; })); }
 function normalizeWrongIds(value: unknown) { return Array.isArray(value) ? Array.from(new Set(value.map(String).filter(Boolean))) : []; }
-function normalizeApiUsage(value: unknown, month: string): ApiUsage { const row = recordOf(value); return { month, count: row.month === month ? Math.min(20, safeCount(row.count)) : 0 }; }
+function normalizeApiUsage(value: unknown, month: string): ApiUsage { const row = recordOf(value); return { month, count: row.month === month ? Math.min(GEMINI_PREMIUM_LIMIT, safeCount(row.count)) : 0 }; }
 function taskKey(task: Pick<Task, 'title' | 'subject' | 'dueDate'>) { return `${task.title.trim().toLocaleLowerCase()}|${task.subject.trim().toLocaleLowerCase()}|${task.dueDate}`; }
 function mergeTasks(existing: Task[], incoming: Task[]) { const seen = new Set(existing.map(taskKey)); const unique = incoming.filter(task => { const key = taskKey(task); if (seen.has(key)) return false; seen.add(key); return true; }); return [...existing, ...unique]; }
 function vocabKey(card: Pick<Vocab, 'term' | 'subject'>) { return `${card.subject.trim().toLocaleLowerCase()}|${card.term.trim().toLocaleLowerCase()}`; }
@@ -66,6 +69,7 @@ function deckArtPath(subject: string) {
 }
 function encodeShareData(value: string) { const bytes = new TextEncoder().encode(value); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, ''); }
 function decodeShareData(value: string) { const normalized = value.replaceAll('-', '+').replaceAll('_', '/'); const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4); const binary = atob(padded); return new TextDecoder().decode(Uint8Array.from(binary, char => char.charCodeAt(0))); }
+function readPremiumActive() { try { return typeof window !== 'undefined' && localStorage.getItem(PREMIUM_STORAGE_KEY) === '1'; } catch { return false; } }
 
 async function toPng(file: File): Promise<File> {
   let source: Blob = file;
@@ -118,7 +122,7 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [screen, setScreen] = useState<Screen>('home');
   const [tasks, setTasks] = useState<Task[]>(starterTasks); const [vocab, setVocab] = useState<Vocab[]>(starterVocab); const [activity, setActivity] = useState<Activity>({});
-  const [todayKey, setTodayKey] = useState(''); const [selectedDay, setSelectedDay] = useState(''); const [weeklyGoal, setWeeklyGoal] = useState(5); const [provider, setProvider] = useState<Provider>('gemma'); const [apiUsage, setApiUsage] = useState<ApiUsage>({ month: '', count: 0 });
+  const [todayKey, setTodayKey] = useState(''); const [selectedDay, setSelectedDay] = useState(''); const [weeklyGoal, setWeeklyGoal] = useState(5); const [provider, setProvider] = useState<Provider>('gemma'); const [apiUsage, setApiUsage] = useState<ApiUsage>({ month: '', count: 0 }); const [premiumActive, setPremiumActive] = useState(readPremiumActive);
   const [reading, setReading] = useState(false); const [message, setMessage] = useState(''); const [fileName, setFileName] = useState('');
   const [memoryReading, setMemoryReading] = useState(false); const [memoryMessage, setMemoryMessage] = useState(''); const [memoryFileName, setMemoryFileName] = useState('');
   const [draftTasks, setDraftTasks] = useState<Task[]>([]); const [subject, setSubject] = useState('すべて'); const [showDone, setShowDone] = useState(false);
@@ -127,7 +131,7 @@ export default function Home() {
   const [showGuide, setShowGuide] = useState(true); const [tutorialStep, setTutorialStep] = useState(0); const [backupMessage, setBackupMessage] = useState('');
   const [manualTitle, setManualTitle] = useState(''); const [manualSubject, setManualSubject] = useState(''); const [manualDue, setManualDue] = useState(''); const [manualBody, setManualBody] = useState(''); const [manualMessage, setManualMessage] = useState('');
   const [shareDeck, setShareDeck] = useState(''); const [shareMessage, setShareMessage] = useState(''); const [deckNames, setDeckNames] = useState<string[]>(defaultDeckNames);
-  const [manageOpen, setManageOpen] = useState(false); const [apiConfigStatus, setApiConfigStatus] = useState<ApiConfigStatus>('unknown');
+  const [manageOpen, setManageOpen] = useState(false); const [apiConfigStatus, setApiConfigStatus] = useState<ApiConfigStatus>('unknown'); const [billingOpen, setBillingOpen] = useState(false); const [billingError, setBillingError] = useState(''); const [billingLoading, setBillingLoading] = useState(false);
   const [gemmaStatus, setGemmaStatus] = useState<GemmaStatus>('unknown');
   const providerTouched = useRef(false);
 
@@ -165,6 +169,21 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session_id');
+      if (params.get('checkout') === 'success' && sessionId) {
+        void fetch(`/api/billing/session?session_id=${encodeURIComponent(sessionId)}`)
+          .then(response => response.ok ? response.json() as Promise<{ active?: boolean }> : null)
+          .then(result => { if (result?.active) { setPremiumActive(true); localStorage.setItem(PREMIUM_STORAGE_KEY, '1'); } })
+          .catch(() => { /* 決済確認に失敗しても学習データは保持 */ })
+          .finally(() => { setBillingLoading(false); window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`); });
+      }
+    } catch { /* localStorage may be unavailable */ }
+  }, [mounted]);
 
   // 公開環境ではサーバー側のAPI設定を優先し、ローカル開発ではGemmaを初期選択にする。
   // 画面が表示されるまでに確認するので、ユーザーが手動で選んだ設定を後から上書きしない。
@@ -238,16 +257,26 @@ export default function Home() {
   const weekCompleted = recentDays.reduce((sum, key) => sum + (activity[key]?.completed ?? 0), 0); const progress = Math.min(100, Math.round((weekCompleted / weeklyGoal) * 100));
   const streak = useMemo(() => { if (!todayKey) return 0; let count = 0; for (let index = 0; index < 30; index += 1) { const day = activity[shiftedDate(todayKey, -index)]; if ((day?.completed ?? 0) + (day?.answered ?? 0) < 1) break; count += 1; } return count; }, [activity, todayKey]);
   const weekEnd = todayKey ? shiftedDate(todayKey, 6) : ''; const dueThisWeek = tasks.filter(task => !task.done && task.dueDate && todayKey && task.dueDate >= todayKey && task.dueDate <= weekEnd).length;
-  const activeApiMonth = todayKey ? todayKey.slice(0, 7) : monthKey(new Date()); const activeApiCount = apiUsage.month === activeApiMonth ? apiUsage.count : 0; const apiRemaining = Math.max(0, 20 - activeApiCount);
+  const activeApiMonth = todayKey ? todayKey.slice(0, 7) : monthKey(new Date()); const apiLimit = premiumActive ? GEMINI_PREMIUM_LIMIT : GEMINI_FREE_LIMIT; const activeApiCount = apiUsage.month === activeApiMonth ? apiUsage.count : 0; const apiRemaining = Math.max(0, apiLimit - activeApiCount);
 
-  function recordApiUsage(amount: number) { const usage = { month: activeApiMonth, count: Math.min(20, activeApiCount + amount) }; setApiUsage(usage); localStorage.setItem('snaptask-api-usage', JSON.stringify(usage)); }
+  function recordApiUsage(amount: number) { const usage = { month: activeApiMonth, count: Math.min(apiLimit, activeApiCount + amount) }; setApiUsage(usage); localStorage.setItem('snaptask-api-usage', JSON.stringify(usage)); }
+
+  async function startCheckout() {
+    setBillingLoading(true); setBillingError('');
+    try {
+      const response = await fetch('/api/billing/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plan: 'premium' }) });
+      const data = await response.json() as { url?: string; error?: string };
+      if (!response.ok || !data.url) throw new Error(data.error ?? '決済設定が未完了です');
+      window.location.href = data.url;
+    } catch (error) { setBillingError(error instanceof Error ? error.message : '決済ページを開けませんでした'); setBillingLoading(false); }
+  }
 
   async function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []); event.target.value = ''; if (!files.length) return; if (files.some(file => file.size > MAX_UPLOAD_BYTES)) { setMessage('写真は1枚12MB以下にしてください。'); return; } if (provider === 'api' && activeApiCount + files.length > 20) { setMessage(`Gemini APIの今月の無料枠（20枚）を超えるため停止しました。残り${apiRemaining}枚です。`); return; } setFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setReading(true); setMessage(''); setDraftTasks([]);
+    const files = Array.from(event.target.files ?? []); event.target.value = ''; if (!files.length) return; if (files.some(file => file.size > MAX_UPLOAD_BYTES)) { setMessage('写真は1枚12MB以下にしてください。'); return; } if (provider === 'api' && activeApiCount + files.length > apiLimit) { setMessage(`Gemini APIの今月の${premiumActive ? 'プレミアム' : '無料'}枠（${apiLimit}枚）を超えるため停止しました。残り${apiRemaining}枚です。`); setBillingOpen(!premiumActive); return; } setFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setReading(true); setMessage(''); setDraftTasks([]);
     try { const images = []; for (const file of files) { const png = await toPng(file); images.push({ content: await dataUrl(png) }); } const response = await fetch('/api/parse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider, images }) }); const payload = await response.json() as { tasks?: Array<{ title?: string; subject?: string; dueDate?: string; body?: string }>; error?: string }; if (!response.ok) throw new Error(payload.error ?? '解析に失敗しました'); if (provider === 'api') recordApiUsage(files.length); const parsed = (payload.tasks ?? []).map(item => ({ id: newId('task'), title: String(item.title ?? ''), subject: String(item.subject ?? ''), dueDate: String(item.dueDate ?? ''), body: String(item.body ?? ''), done: false })).filter(item => item.title); if (!parsed.length) throw new Error('課題を見つけられませんでした'); setDraftTasks(parsed); setMessage(`${parsed.length}件の課題を読み取りました。内容を確認して保存してね。`); } catch (error) { setMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setReading(false); }
   }
   async function chooseMemoryPhoto(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []); event.target.value = ''; if (!files.length) return; if (files.some(file => file.size > MAX_UPLOAD_BYTES)) { setMemoryMessage('写真は1枚12MB以下にしてください。'); return; } if (provider === 'api' && activeApiCount + files.length > 20) { setMemoryMessage(`Gemini APIの今月の無料枠（20枚）を超えるため停止しました。残り${apiRemaining}枚です。`); return; } setMemoryFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setMemoryReading(true); setMemoryMessage('');
+    const files = Array.from(event.target.files ?? []); event.target.value = ''; if (!files.length) return; if (files.some(file => file.size > MAX_UPLOAD_BYTES)) { setMemoryMessage('写真は1枚12MB以下にしてください。'); return; } if (provider === 'api' && activeApiCount + files.length > apiLimit) { setMemoryMessage(`Gemini APIの今月の${premiumActive ? 'プレミアム' : '無料'}枠（${apiLimit}枚）を超えるため停止しました。残り${apiRemaining}枚です。`); setBillingOpen(!premiumActive); return; } setMemoryFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setMemoryReading(true); setMemoryMessage('');
     try { const images = []; for (const file of files) { const png = await toPng(file); images.push({ content: await dataUrl(png) }); } const response = await fetch('/api/parse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider, mode: 'memorize', images }) }); const payload = await response.json() as { cards?: Array<{ front?: string; back?: string; subject?: string }>; error?: string }; if (!response.ok) throw new Error(payload.error ?? '解析に失敗しました'); if (provider === 'api') recordApiUsage(files.length); const parsed = (payload.cards ?? []).map(item => ({ id: newId('vocab'), term: String(item.front ?? ''), meaning: String(item.back ?? ''), subject: String(item.subject ?? 'その他') })).filter(item => item.term && item.meaning); if (!parsed.length) throw new Error('暗記項目を見つけられませんでした'); const merged = mergeVocab(vocab, parsed); const added = merged.length - vocab.length; saveVocab(merged); setDeck(parsed[0].subject); setMemoryMessage(added ? `${added}件を${parsed[0].subject}の暗記ページに追加しました！` : '読み取ったカードはすべて登録済みでした。'); } catch (error) { setMemoryMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setMemoryReading(false); }
   }
   function updateDraft(index: number, field: keyof Task, value: string) { setDraftTasks(current => current.map((item, i) => i === index ? { ...item, [field]: value } : item)); }
@@ -291,6 +320,7 @@ export default function Home() {
       {showGuide && <section className="guide-card tutorial-card" aria-labelledby="tutorial-title"><div className="tutorial-head"><div><p className="kicker">TUTORIAL</p><h2 id="tutorial-title">SnapTaskの使い方</h2><p>写真から始めて、提出と復習まで4ステップ。</p></div><button aria-label="チュートリアルを閉じる" onClick={dismissGuide}>×</button></div><div className="tutorial-progress" aria-label="チュートリアルの進行"><span>{tutorialSteps.map((step, index) => <button type="button" key={step.label} className={index === tutorialStep ? 'active' : index < tutorialStep ? 'is-done' : ''} onClick={() => setTutorialStep(index)} aria-label={`${index + 1} ${step.label}`}><i>{index < tutorialStep ? '✓' : index + 1}</i>{step.label}</button>)}</span><small>{tutorialStep + 1} / {tutorialSteps.length}</small></div><div className="tutorial-body"><span className="tutorial-number">0{tutorialStep + 1}</span><div><b>{tutorialSteps[tutorialStep].label}</b><h3>{tutorialSteps[tutorialStep].title}</h3><p>{tutorialSteps[tutorialStep].body}</p></div></div><div className="tutorial-actions">{tutorialStep > 0 && <button className="outline-button" onClick={() => setTutorialStep(step => step - 1)}>← 戻る</button>}{tutorialStep < tutorialSteps.length - 1 ? <button className="save-button" onClick={() => setTutorialStep(step => step + 1)}>次へ →</button> : <button className="save-button" onClick={() => { dismissGuide(); setScreen('add'); }}>写真を追加する →</button>}</div></section>}
       <div className="quick-actions"><button className="capture-card" onClick={() => setScreen('add')}><span className="capture-icon">▣</span><span><b>プリント・黒板を撮る</b><small>課題名・教科・締切を自動入力</small></span><i>→</i></button><button className="capture-card memory-action" onClick={() => setScreen('english')}><span className="capture-icon">暗</span><span><b>教材を暗記カードにする</b><small>教科を判別して整理・復習</small></span><i>→</i></button></div>
       <div className="snap-stats"><div><b>{tasks.length}</b><span>登録タスク</span></div><div><b>{tasks.filter(task => task.done).length}</b><span>完了</span></div><div><b>{dueThisWeek}</b><span>今週締切</span></div><div><b>{streak}</b><span>連続日数</span></div></div>
+      <div className="premium-banner"><div><span className="premium-kicker">{premiumActive ? 'PREMIUM ACTIVE' : 'GEMINI API'}</span><strong>{premiumActive ? 'プレミアム：今月あと' + apiRemaining + '枚' : '無料は月20枚まで'}</strong><small>{premiumActive ? '写真からのカード作成を月300枚まで使えます。' : 'もっと使いたいときは追加プランを確認できます。'}</small></div><button onClick={() => setBillingOpen(true)}>{premiumActive ? 'プランを確認' : '枚数を増やす'}</button></div>
       <div className="progress-card"><div className="progress-heading"><div><p className="kicker">YOUR PACE</p><h2>今週のペース</h2></div><strong>{weekCompleted}<small> / {weeklyGoal}件</small></strong></div><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-foot"><span>{progress >= 100 ? '目標達成！' : `あと${Math.max(0, weeklyGoal - weekCompleted)}件で目標`}</span><span className="daily-log">今日のテスト {activity[todayKey]?.answered ?? 0}問・ミス {activity[todayKey]?.wrong ?? 0}問</span><button onClick={changeGoal}>目標を変更</button></div><div className="week-strip">{recentDays.map(key => <button type="button" key={key} className={`${(activity[key]?.completed ?? 0) + (activity[key]?.answered ?? 0) > 0 ? 'has-activity' : ''} ${selectedDay === key ? 'selected' : ''}`} onClick={() => setSelectedDay(key)} aria-label={`${formatDay(key)}：課題${activity[key]?.completed ?? 0}件、テスト${activity[key]?.answered ?? 0}問、ミス${activity[key]?.wrong ?? 0}問`}><span>{formatDay(key)}</span><i>{activity[key]?.completed ?? 0}</i><small>テスト {activity[key]?.answered ?? 0}</small></button>)}</div>{selectedDay && <div className="calendar-detail"><b>{selectedDay === todayKey ? '今日' : formatDay(selectedDay)}の振り返り</b><span>課題完了 <strong>{activity[selectedDay]?.completed ?? 0}</strong>件</span><span>テスト <strong>{activity[selectedDay]?.answered ?? 0}</strong>問</span><span>ミス <strong>{activity[selectedDay]?.wrong ?? 0}</strong>問</span></div>}</div>
       <div className="snap-section-title"><div><p className="kicker">TASKS</p><h2>提出物一覧</h2></div><button onClick={() => setShowDone(value => !value)}>{showDone ? '未完了だけ' : '完了も表示'}</button></div><div className="filter-row">{subjects.map(item => <button key={item} className={subject === item ? 'active' : ''} onClick={() => setSubject(item)}>{item}</button>)}</div>
       <div className="task-list">{sortedTasks.length ? sortedTasks.map(task => <article className={`task-card ${task.done ? 'is-done' : ''}`} key={task.id}>{editingTask?.id === task.id ? <div className="task-edit"><div className="task-edit-grid"><label>課題名<input value={editingTask.title} onChange={event => setEditingTask({ ...editingTask, title: event.target.value })} /></label><label>教科<input value={editingTask.subject} onChange={event => setEditingTask({ ...editingTask, subject: event.target.value })} /></label><label>締切<input type="date" value={editingTask.dueDate} onChange={event => setEditingTask({ ...editingTask, dueDate: event.target.value })} /></label></div><label>やること<textarea rows={2} value={editingTask.body} onChange={event => setEditingTask({ ...editingTask, body: event.target.value })} /></label><div className="edit-actions"><button onClick={saveEditedTask}>保存</button><button onClick={() => setEditingTask(null)}>キャンセル</button></div></div> : <><button className="check-box" aria-label={`${task.title}を完了にする`} onClick={() => toggleTask(task.id)}>{task.done ? '✓' : ''}</button><div className="task-main"><div className="task-meta"><span>{task.subject || '教科未設定'}</span><time className={`due-${dueTone(task.dueDate, todayKey)}`}>{formatDue(task.dueDate)}{dueHint(task.dueDate, todayKey) && <small>{dueHint(task.dueDate, todayKey)}</small>}</time></div><h3>{task.title}</h3><p>{task.body}</p></div><div className="task-actions"><button onClick={() => setEditingTask({ ...task })}>編集</button><button className="task-delete" aria-label={`${task.title}を削除`} onClick={() => removeTask(task.id)}>削除</button></div></>}</article>) : <div className="empty-state"><b>提出物はありません</b><span>写真を撮って課題を追加しよう。</span></div>}</div>
@@ -302,9 +332,10 @@ export default function Home() {
     <nav className="snap-nav"><button className={screen === 'home' ? 'active' : ''} onClick={() => setScreen('home')}><span>⌂</span>ホーム</button><button className={screen === 'add' ? 'active' : ''} onClick={() => setScreen('add')}><span>＋</span>追加</button><button className={screen === 'english' ? 'active' : ''} onClick={() => setScreen('english')}><span>暗</span>暗記</button><button className={screen === 'share' ? 'active' : ''} onClick={() => { setScreen('share'); setShareDeck(shareableDecks[0] ?? ''); setShareMessage(''); }}><span>↗</span>共有</button></nav>
     {screen === 'english' && memoryMode !== 'flash' && <button className="flash-launch" onClick={startFlash} disabled={!deckWords.length}>一周学習をはじめる</button>}
     {screen === 'english' && memoryMode === 'flash' && <FlashStudyPanel cards={deckWords} index={flashIndex} known={flashKnown} revealed={flashRevealed} finished={flashFinished} onReveal={() => setFlashRevealed(true)} onAnswer={answerFlash} onRestart={startFlash} onClose={() => { setMemoryMode('list'); setFlashFinished(false); }} />}
-    {provider === 'api' && <div className="api-quota-badge">Gemini API：今月あと{apiRemaining}枚</div>}
+    {provider === 'api' && <button className="api-quota-badge" onClick={() => setBillingOpen(true)}>Gemini API：今月あと{apiRemaining}枚 <small>{premiumActive ? 'プレミアム' : '枚数を増やす'}</small></button>}
     {provider === 'gemma' && (screen === 'add' || screen === 'english') && <div className={`gemma-status gemma-${gemmaStatus}`}><span>{gemmaStatus === 'ready' ? '● Gemma接続中' : gemmaStatus === 'offline' ? '● Gemma未接続' : gemmaStatus === 'checking' ? '○ 接続確認中…' : '○ Gemma接続を確認'}</span><button onClick={checkGemma} disabled={gemmaStatus === 'checking'}>{gemmaStatus === 'offline' ? '再確認' : '確認'}</button>{gemmaStatus === 'offline' && <button className="gemma-switch" onClick={() => selectProvider('api')}>Geminiへ</button>}</div>}
     {screen === 'english' && !manageOpen && memoryMode !== 'flash' && <button className="organize-launch" onClick={() => setManageOpen(true)} disabled={!deckWords.length}>カードを整理</button>}
     {screen === 'english' && manageOpen && <MoveCardPanel cards={deckWords} decks={decks} onMove={moveWord} onClose={() => setManageOpen(false)} />}
+    {billingOpen && <div className="modal-backdrop" role="presentation" onClick={() => setBillingOpen(false)}><div className="billing-modal" role="dialog" aria-modal="true" aria-labelledby="billing-title" onClick={event => event.stopPropagation()}><button className="modal-close" onClick={() => setBillingOpen(false)} aria-label="閉じる">×</button><span className="premium-kicker">PREMIUM</span><h2 id="billing-title">写真の読み取り枚数を増やす</h2><p>無料枠は月20枚。プレミアムなら月300枚までGeminiで読み取れます。</p><div className="plan-price"><strong>¥480</strong><span>/ 月（予定）</span></div><ul><li>写真からの課題・暗記カード作成 月300枚</li><li>HEIC・JPGの自動PNG変換</li><li>手入力・学習記録は今まで通り無料</li></ul><button className="save-button" onClick={startCheckout} disabled={billingLoading}>{billingLoading ? '決済ページを準備中…' : '購入ページへ進む →'}</button>{billingError && <small className="billing-error">{billingError}<br />Stripeの決済情報をVercelに設定すると有効になります。</small>}<small className="billing-note">決済設定が未完了の間は、課金は発生しません。</small></div></div>}
   </main>;
 }
