@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     if (mode === 'memorize') { const unique = new Map<string, { front: string; back: string; subject: string }>(); for (const card of cleanCards(tasks)) unique.set(`${card.front}|${card.subject}`.toLowerCase(), card); return NextResponse.json({ cards: Array.from(unique.values()) }); }
     const unique = new Map<string, { title: string; subject: string; dueDate: string; body: string }>(); for (const task of cleanTasks(tasks)) unique.set(`${task.title}|${task.subject}`.toLowerCase(), task);
     return NextResponse.json({ tasks: Array.from(unique.values()) });
-  } catch (error) { return NextResponse.json({ error: provider === 'gemma' ? 'Gemmaに接続できませんでした。Bionic / LM Studioで http://127.0.0.1:1234/v1 を起動してください。' : 'APIで解析できませんでした。GEMINI_API_KEYとモデル設定を確認してください。', detail: error instanceof Error ? error.message.slice(0, 400) : '' }, { status: 503 }); }
+  } catch (error) { console.error('SnapTask AI parse failed', { provider, mode, reason: error instanceof Error ? error.message.slice(0, 400) : 'unknown' }); return NextResponse.json({ error: provider === 'gemma' ? 'Gemmaに接続できませんでした。Bionic / LM Studioで http://127.0.0.1:1234/v1 を起動してください。' : 'APIで解析できませんでした。GEMINI_API_KEYとモデル設定を確認してください。' }, { status: 503 }); }
 }
 
 // 公開後の接続確認用。秘密情報やキーの値は返さない。
