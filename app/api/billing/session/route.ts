@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 /** Stripe Checkout後の購入確認。キーや決済情報はレスポンスに含めません。 */
 export async function GET(request: Request) {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
+  const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
   const sessionId = new URL(request.url).searchParams.get('session_id');
   if (!secretKey || !sessionId) return NextResponse.json({ active: false }, { status: 400 });
   const liveMode = process.env.STRIPE_TEST_MODE === 'false';

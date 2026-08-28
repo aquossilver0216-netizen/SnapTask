@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
  * 秘密鍵・価格IDを設定するまでは決済を開始せず、安全に設定不足を返します。
  */
 export async function POST() {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
+  const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
   const liveMode = process.env.STRIPE_TEST_MODE === 'false';
   // 本番とテストでPrice IDも分離し、環境をまたいだ設定ミスを防ぐ。
   const priceId = liveMode ? process.env.STRIPE_PRICE_ID_PREMIUM_LIVE : process.env.STRIPE_PRICE_ID_PREMIUM;
