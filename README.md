@@ -4,7 +4,7 @@
 
 ## 起動
 
-`start-snaptask.command` をダブルクリックするか、プロジェクト内で `pnpm dev` を実行し、表示された `http://localhost:3000`（Tanngoが起動中なら `3001`）を開きます。
+`start-snaptask.command` をダブルクリックするか、プロジェクト内で `pnpm dev` を実行し、表示されたURLを開きます。3000〜3010の中から空いているポートを自動で選びます。
 
 ## AIモード
 
@@ -12,3 +12,7 @@
 - **Gemini API**：`.env.local` に `GEMINI_API_KEY=...` を設定して、画面の「Gemini API」に切り替えます。キーはブラウザへ送られません。
 
 課題と単語帳は端末のlocalStorageに保存されます。あとで大会向けにGeminiへ切り替える場合も、画面の選択とサーバー側ルートはそのまま使えます。
+
+## テック甲子園向け
+
+課題の写真撮影から確認・保存・完了・日別振り返りまでのデモ台本は [`docs/tech-koshien-pitch.md`](docs/tech-koshien-pitch.md) にまとめています。
