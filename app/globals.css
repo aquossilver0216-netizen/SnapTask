@@ -11,4 +11,5 @@
 .word-delete{align-self:flex-start;margin-left:auto;border:0;background:transparent;color:#a56b57;font-size:9px;cursor:pointer}
 .app-loading{display:flex;min-height:100vh;align-items:center;justify-content:center;gap:10px;color:var(--muted);font-size:12px}
 .app-loading .brand-dot{flex:0 0 auto}
+.daily-log{color:var(--green);font-size:9px;font-weight:800}.week-strip div small{font-size:7px;white-space:nowrap}.week-strip div.has-activity small{color:var(--green)}
 @media(max-width:560px){.guide-steps small{font-size:8px}.data-tools span{width:100%;margin-right:0}}
