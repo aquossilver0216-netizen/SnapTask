@@ -11,7 +11,7 @@
 - [ ] `pnpm test:smoke https://公開URL` が成功する
 - [ ] `https://公開URL/api/parse` を開き、`ok: true` のヘルスチェックを確認する（APIキーの値は表示されない）
 - [ ] 公開環境の環境変数に `GEMINI_API_KEY` を登録する（キーをソースコードへ書かない）
-- [ ] Gemmaモードを使う場合は、デモ端末でBionic / LM Studioの `http://127.0.0.1:1234/v1` を起動する
+- [ ] Gemmaモードを使う場合は、デモ端末でBionic / LM Studioの `http://127.0.0.1:1234/v1` を起動し、追加画面の「Gemma接続を確認」で「接続中」を確認する
 
 ## 90秒デモ
 
