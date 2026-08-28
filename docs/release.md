@@ -28,6 +28,10 @@ pnpm test:smoke http://localhost:3000
 
 `LOCAL_GEMMA_BASE_URL`は公開サーバーから開発Macへ接続できないため、公開環境には設定しません。公開版の写真解析は画面で「Gemini API」を選びます。Gemmaは開発・オフラインデモ用です。`GEMINI_API_KEY`が設定された公開環境では、初回表示時にGemini APIが自動選択されます。写真は1枚12MB以下・最大12枚です。
 
+### GitHub PagesではなくVercelを使う理由
+
+GitHub Pagesは静的ファイル配信のみで、SnapTaskの`/api/parse`（Gemini APIを呼ぶサーバー処理）を実行できません。GitHubにはソースコードを置き、GitHub連携したVercelでNext.jsアプリとして公開してください。これなら公開URLから写真解析まで動作し、APIキーもVercelの環境変数に隠せます。
+
 ## 3. 公開後の確認
 
 公開URLで次を確認します。
@@ -60,3 +64,7 @@ pnpm test:smoke https://公開URL
 - データは端末のlocalStorageに保存され、バックアップ保存・復元ができること
 - 暗記ページをJSONで共有・取り込みできること（本番の公開リンクは別途サーバー実装）
 - AIが利用できない場合のサンプル導線
+
+## 6. テック甲子園提出前の最終確認
+
+公式FAQではWebアプリも応募対象で、一般ユーザーがアクセスできるリリース済み状態が必要です。1次審査の提出物は、リリースURL、ビルド前ソースコードzip、キャプチャ動画、スクリーンショット4枚、公式テンプレートの企画書PDFです。2026年の1次審査作品データ提出締切は8月30日（日）17:00と案内されています。締切・提出フォームは変更される可能性があるため、提出直前に[公式FAQ](https://techkoshien.jp/faq)と[開発部門エントリー](https://techkoshien.jp/develop-entry)を必ず確認してください。
