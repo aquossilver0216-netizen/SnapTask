@@ -9,6 +9,11 @@ export async function POST() {
   const priceId = process.env.STRIPE_PRICE_ID_PREMIUM;
   const appUrl = process.env.APP_URL ?? 'https://snap-task-xi.vercel.app';
   if (!secretKey || !priceId) return NextResponse.json({ error: '決済設定が未完了です。Stripeの環境変数を設定してください。' }, { status: 503 });
+  // テストモードは明示的に解除するまでsk_testキーだけを許可する。
+  // 本番公開時はSTRIPE_TEST_MODE=falseに変更してsk_liveキーへ切り替える。
+  if (process.env.STRIPE_TEST_MODE !== 'false' && !secretKey.startsWith('sk_test_')) {
+    return NextResponse.json({ error: '現在はテストモードです。Stripeのsk_test_キーを設定してください。' }, { status: 503 });
+  }
 
   const params = new URLSearchParams({
     mode: 'subscription',
