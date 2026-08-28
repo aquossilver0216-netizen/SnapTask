@@ -127,12 +127,19 @@ export default function Home() {
       setSelectedDay(currentDate);
       try {
         const usage = normalizeApiUsage(JSON.parse(localStorage.getItem('snaptask-api-usage') ?? 'null'), monthKey(new Date())); setApiUsage(usage); localStorage.setItem('snaptask-api-usage', JSON.stringify(usage));
-        const savedTasks = JSON.parse(localStorage.getItem('snaptask-tasks') ?? 'null'); if (Array.isArray(savedTasks)) setTasks(normalizeTasks(savedTasks)); else setTasks(demoTasksFor(currentDate));
-        const savedWords = JSON.parse(localStorage.getItem('snaptask-vocab') ?? 'null'); if (Array.isArray(savedWords)) setVocab(normalizeVocab(savedWords));
-        const savedActivity = JSON.parse(localStorage.getItem('snaptask-activity') ?? 'null'); if (savedActivity && typeof savedActivity === 'object') setActivity(normalizeActivity(savedActivity));
-        const savedWrong = JSON.parse(localStorage.getItem('snaptask-wrong-cards') ?? 'null'); if (Array.isArray(savedWrong)) setWrongIds(normalizeWrongIds(savedWrong));
-        const savedGoal = Number(localStorage.getItem('snaptask-weekly-goal')); if (Number.isFinite(savedGoal) && savedGoal > 0) setWeeklyGoal(savedGoal);
-        setShowGuide(localStorage.getItem('snaptask-guide-seen') !== '1');
+        const demoMode = new URLSearchParams(window.location.search).get('demo') === '1';
+        if (demoMode) {
+          const nextTasks = demoTasksFor(currentDate);
+          setTasks(nextTasks); setVocab([...starterVocab]); setActivity({}); setWrongIds([]); setWeeklyGoal(5); setShowGuide(true);
+          localStorage.setItem('snaptask-tasks', JSON.stringify(nextTasks)); localStorage.setItem('snaptask-vocab', JSON.stringify(starterVocab)); localStorage.setItem('snaptask-activity', '{}'); localStorage.setItem('snaptask-wrong-cards', '[]'); localStorage.setItem('snaptask-weekly-goal', '5');
+        } else {
+          const savedTasks = JSON.parse(localStorage.getItem('snaptask-tasks') ?? 'null'); if (Array.isArray(savedTasks)) setTasks(normalizeTasks(savedTasks)); else setTasks(demoTasksFor(currentDate));
+          const savedWords = JSON.parse(localStorage.getItem('snaptask-vocab') ?? 'null'); if (Array.isArray(savedWords)) setVocab(normalizeVocab(savedWords));
+          const savedActivity = JSON.parse(localStorage.getItem('snaptask-activity') ?? 'null'); if (savedActivity && typeof savedActivity === 'object') setActivity(normalizeActivity(savedActivity));
+          const savedWrong = JSON.parse(localStorage.getItem('snaptask-wrong-cards') ?? 'null'); if (Array.isArray(savedWrong)) setWrongIds(normalizeWrongIds(savedWrong));
+          const savedGoal = Number(localStorage.getItem('snaptask-weekly-goal')); if (Number.isFinite(savedGoal) && savedGoal > 0) setWeeklyGoal(savedGoal);
+          setShowGuide(localStorage.getItem('snaptask-guide-seen') !== '1');
+        }
       } catch { setTasks(demoTasksFor(currentDate)); /* 壊れた保存データでもデモ画面を維持 */ }
       setMounted(true);
     }, 0);
