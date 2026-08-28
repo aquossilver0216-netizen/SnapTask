@@ -4,7 +4,7 @@
 
 ## 起動
 
-`start-snaptask.command` をダブルクリックするか、プロジェクト内で `pnpm dev` を実行し、`http://localhost:3000` を開きます。
+`start-snaptask.command` をダブルクリックするか、プロジェクト内で `pnpm dev` を実行し、表示された `http://localhost:3000`（Tanngoが起動中なら `3001`）を開きます。
 
 ## AIモード
 
