@@ -15,8 +15,44 @@ function parseJson(text: string): Record<string, unknown> | null {
     if (objectStart >= 0 && objectEnd > objectStart) { try { return recordOf(JSON.parse(clean.slice(objectStart, objectEnd + 1))); } catch { /* 配列形式を下で試す */ } }
     const arrayStart = clean.indexOf('['); const arrayEnd = clean.lastIndexOf(']');
     if (arrayStart >= 0 && arrayEnd > arrayStart) { try { const parsed = JSON.parse(clean.slice(arrayStart, arrayEnd + 1)) as unknown; return Array.isArray(parsed) ? { cards: parsed, tasks: parsed } : null; } catch { return null; } }
-    return null;
+    // Visionモデルによっては、JSONの代わりに表・箇条書きで返すことがある。
+    // その場合も「英単語 - 日本語」のような行をカードとして救済する。
+    const rows = parseLooseRows(clean);
+    return rows.length ? {
+      cards: rows,
+      tasks: rows.map(row => ({ title: row.front, subject: row.subject, dueDate: '', body: row.back })),
+    } : null;
   }
+}
+
+function parseLooseRows(text: string): Array<{ front: string; back: string; subject: string }> {
+  const rows: Array<{ front: string; back: string; subject: string }> = [];
+  const seen = new Set<string>();
+  for (const source of text.split(/\r?\n/)) {
+    let line = source.trim();
+    if (!line || /^[-|: ]+$/.test(line) || /^(front|term|word|単語|意味|説明|英単語|日本語)$/i.test(line)) continue;
+    line = line.replace(/^\s*(?:[-*・]|\d+[.)])\s*/, '').trim();
+    if (line.startsWith('|')) line = line.slice(1);
+    if (line.endsWith('|')) line = line.slice(0, -1);
+    const cells = line.split('|').map(cell => cell.trim()).filter(Boolean);
+    let front = '';
+    let back = '';
+    if (cells.length >= 2) {
+      [front, back] = cells;
+    } else {
+      const match = line.match(/^(.*?)\s*(?:\t+|\s+(?:=>|->|→|[-–—])\s+|\s*[:：]\s+)(.+)$/);
+      if (!match) continue;
+      front = match[1].trim();
+      back = match[2].trim();
+    }
+    if (!front || !back || front.length > 160 || back.length > 500) continue;
+    if (/^(front|term|word|単語|意味|説明|英単語|日本語)$/i.test(front) || /^[-:]+$/.test(back)) continue;
+    const key = `${front.toLocaleLowerCase()}|${back.toLocaleLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ front, back, subject: 'その他' });
+  }
+  return rows.slice(0, 120);
 }
 
 function modelContent(value: unknown): string {
@@ -34,7 +70,7 @@ function modelContent(value: unknown): string {
 }
 function cleanCards(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.map(item => { const row = recordOf(item); return { front: String(row.front ?? row.term ?? row.word ?? row.question ?? row.prompt ?? '').trim(), back: String(row.back ?? row.meaning ?? row.translation ?? row.answer ?? row.explanation ?? '').trim(), subject: String(row.subject ?? row.deck ?? row.category ?? 'その他').trim() || 'その他' }; }).filter(card => card.front && card.back).slice(0, 120);
+  return value.map(item => { const row = recordOf(item); return { front: String(row.front ?? row.term ?? row.word ?? row.expression ?? row.english ?? row.question ?? row.prompt ?? row.keyword ?? row.title ?? row.name ?? '').trim(), back: String(row.back ?? row.meaning ?? row.translation ?? row.japanese ?? row.definition ?? row.answer ?? row.explanation ?? row.description ?? row.gloss ?? '').trim(), subject: String(row.subject ?? row.deck ?? row.category ?? row.topic ?? 'その他').trim() || 'その他' }; }).filter(card => card.front && card.back).slice(0, 120);
 }
 function cleanTasks(value: unknown) {
   if (!Array.isArray(value)) return [];
