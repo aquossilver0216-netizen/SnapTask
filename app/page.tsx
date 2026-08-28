@@ -46,13 +46,29 @@ async function toPng(file: File): Promise<File> {
     const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: .94 });
     source = Array.isArray(converted) ? converted[0] : converted;
   }
-  const image = await createImageBitmap(source);
-  const scale = Math.min(1, 2200 / Math.max(image.width, image.height));
+  let bitmap: ImageBitmap | null = null;
+  let image: HTMLImageElement | null = null;
+  if (typeof createImageBitmap === 'function') {
+    try { bitmap = await createImageBitmap(source); } catch { /* SafariなどではImage要素へフォールバック */ }
+  }
+  if (!bitmap) {
+    const objectUrl = URL.createObjectURL(source);
+    image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new window.Image();
+      element.onload = () => { URL.revokeObjectURL(objectUrl); resolve(element); };
+      element.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('画像を読み込めません')); };
+      element.src = objectUrl;
+    });
+  }
+  const width = bitmap?.width ?? image?.naturalWidth ?? 0;
+  const height = bitmap?.height ?? image?.naturalHeight ?? 0;
+  if (!width || !height) throw new Error('画像サイズを取得できません');
+  const scale = Math.min(1, 2200 / Math.max(width, height));
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale));
+  canvas.width = Math.max(1, Math.round(width * scale)); canvas.height = Math.max(1, Math.round(height * scale));
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('画像を変換できません');
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(image, 0, 0, canvas.width, canvas.height); image.close();
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(bitmap ?? image, 0, 0, canvas.width, canvas.height); bitmap?.close();
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('PNG変換に失敗しました')), 'image/png'));
   return new File([blob], file.name.replace(/\.(heic|heif|jpe?g)$/i, '.png'), { type: 'image/png' });
 }
