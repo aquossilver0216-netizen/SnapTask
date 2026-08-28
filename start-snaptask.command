@@ -1,6 +1,6 @@
 #!/bin/zsh
 set -e
-PROJECT_DIR="/Users/torikunn/Documents/Codex/2026-08-27/new-chat/snaptask-app"
+PROJECT_DIR="${0:A:h}"
 NODE_DIR="/Users/torikunn/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin"
 PNPM_DIR="/Users/torikunn/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/fallback"
 export PATH="$NODE_DIR:$PNPM_DIR:$PATH"
