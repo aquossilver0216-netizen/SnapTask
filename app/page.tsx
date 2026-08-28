@@ -9,6 +9,7 @@ type ApiUsage = { month: string; count: number };
 type Screen = 'home' | 'add' | 'english' | 'share';
 type Provider = 'gemma' | 'api';
 type MemoryMode = 'list' | 'flash' | 'quiz';
+type GemmaStatus = 'unknown' | 'checking' | 'ready' | 'offline';
 
 const starterTasks: Task[] = [
   { id: 'task-1', title: '数学ワーク p.24〜27', subject: '数学', dueDate: '2026-08-30', body: '問題を解いて提出する', done: false },
@@ -102,6 +103,7 @@ export default function Home() {
   const [manualTitle, setManualTitle] = useState(''); const [manualSubject, setManualSubject] = useState(''); const [manualDue, setManualDue] = useState(''); const [manualBody, setManualBody] = useState(''); const [manualMessage, setManualMessage] = useState('');
   const [shareDeck, setShareDeck] = useState(''); const [shareMessage, setShareMessage] = useState('');
   const [manageOpen, setManageOpen] = useState(false);
+  const [gemmaStatus, setGemmaStatus] = useState<GemmaStatus>('unknown');
 
   function saveTasks(next: Task[]) { setTasks(next); localStorage.setItem('snaptask-tasks', JSON.stringify(next)); }
   function saveVocab(next: Vocab[]) { setVocab(next); localStorage.setItem('snaptask-vocab', JSON.stringify(next)); }
@@ -163,6 +165,7 @@ export default function Home() {
   function removeTask(id: string) { const target = tasks.find(task => task.id === id); if (target && window.confirm(`「${target.title}」を削除しますか？`)) saveTasks(tasks.filter(task => task.id !== id)); }
   function removeWord(id: string) { const target = vocab.find(card => card.id === id); if (target && window.confirm(`「${target.term}」を暗記カードから削除しますか？`)) { saveVocab(vocab.filter(card => card.id !== id)); setWrongIds(current => { const next = current.filter(cardId => cardId !== id); localStorage.setItem('snaptask-wrong-cards', JSON.stringify(next)); return next; }); } }
   function moveWord(id: string, subjectName: string) { const next = vocab.map(card => card.id === id ? { ...card, subject: subjectName } : card); saveVocab(next); if (shareDeck === vocab.find(card => card.id === id)?.subject) setShareDeck(subjectName); }
+  async function checkGemma() { setGemmaStatus('checking'); try { const response = await fetch('/api/parse?check=gemma'); setGemmaStatus(response.ok ? 'ready' : 'offline'); } catch { setGemmaStatus('offline'); } }
   function saveEditedTask() { if (!editingTask?.title.trim()) return; saveTasks(tasks.map(task => task.id === editingTask.id ? { ...editingTask, title: editingTask.title.trim(), subject: editingTask.subject.trim() || '教科未設定' } : task)); setEditingTask(null); }
   function changeGoal() { const value = window.prompt('1週間の完了目標（件）', String(weeklyGoal)); const parsed = Number(value); if (Number.isFinite(parsed) && parsed > 0 && parsed <= 99) { setWeeklyGoal(Math.round(parsed)); localStorage.setItem('snaptask-weekly-goal', String(Math.round(parsed))); } }
   function addWord(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!term.trim() || !meaning.trim()) { setEnglishMessage('用語と説明を入力してね。'); return; } saveVocab([...vocab, { id: newId('vocab'), term: term.trim(), meaning: meaning.trim(), subject: deck }]); setTerm(''); setMeaning(''); setEnglishMessage('暗記カードに追加しました！'); }
@@ -203,6 +206,7 @@ export default function Home() {
     {screen === 'english' && memoryMode !== 'flash' && <button className="flash-launch" onClick={startFlash} disabled={!deckWords.length}>一周学習をはじめる</button>}
     {screen === 'english' && memoryMode === 'flash' && <FlashStudyPanel cards={deckWords} index={flashIndex} known={flashKnown} revealed={flashRevealed} finished={flashFinished} onReveal={() => setFlashRevealed(true)} onAnswer={answerFlash} onRestart={startFlash} onClose={() => { setMemoryMode('list'); setFlashFinished(false); }} />}
     {provider === 'api' && <div className="api-quota-badge">Gemini API：今月あと{apiRemaining}枚</div>}
+    {provider === 'gemma' && (screen === 'add' || screen === 'english') && <div className={`gemma-status gemma-${gemmaStatus}`}><span>{gemmaStatus === 'ready' ? '● Gemma接続中' : gemmaStatus === 'offline' ? '● Gemma未接続' : gemmaStatus === 'checking' ? '○ 接続確認中…' : '○ Gemma接続を確認'}</span><button onClick={checkGemma} disabled={gemmaStatus === 'checking'}>{gemmaStatus === 'offline' ? '再確認' : '確認'}</button>{gemmaStatus === 'offline' && <button className="gemma-switch" onClick={() => setProvider('api')}>Geminiへ</button>}</div>}
     {screen === 'english' && !manageOpen && memoryMode !== 'flash' && <button className="organize-launch" onClick={() => setManageOpen(true)} disabled={!deckWords.length}>カードを整理</button>}
     {screen === 'english' && manageOpen && <MoveCardPanel cards={deckWords} decks={decks} onMove={moveWord} onClose={() => setManageOpen(false)} />}
   </main>;

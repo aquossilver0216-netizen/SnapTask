@@ -57,7 +57,12 @@ export async function POST(request: Request) {
 }
 
 // 公開後の接続確認用。秘密情報やキーの値は返さない。
-export async function GET() {
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('check') === 'gemma') {
+    const base = process.env.LOCAL_GEMMA_BASE_URL || 'http://127.0.0.1:1234/v1';
+    try { const response = await fetch(`${base.replace(/\/$/, '')}/models`, { signal: AbortSignal.timeout(1200) }); return NextResponse.json({ ok: response.ok, provider: 'gemma', message: response.ok ? 'Gemmaに接続できます' : 'Gemmaから応答がありません' }, { status: response.ok ? 200 : 503 }); } catch { return NextResponse.json({ ok: false, provider: 'gemma', message: 'Gemmaに接続できません' }, { status: 503 }); }
+  }
   return NextResponse.json({
     ok: true,
     providers: { gemma: true, api: Boolean(process.env.GEMINI_API_KEY) },
