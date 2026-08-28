@@ -7,7 +7,16 @@ const memorizePrompt = `学校の教材写真を、復習できる暗記カー�
 
 function parseJson(text: string): Record<string, unknown> | null {
   const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  try { return JSON.parse(clean) as { tasks?: unknown }; } catch { const start = clean.indexOf('{'); const end = clean.lastIndexOf('}'); if (start >= 0 && end > start) { try { return JSON.parse(clean.slice(start, end + 1)) as { tasks?: unknown }; } catch { return null; } } return null; }
+  try {
+    const parsed = JSON.parse(clean) as unknown;
+    return Array.isArray(parsed) ? { cards: parsed, tasks: parsed } : recordOf(parsed);
+  } catch {
+    const objectStart = clean.indexOf('{'); const objectEnd = clean.lastIndexOf('}');
+    if (objectStart >= 0 && objectEnd > objectStart) { try { return recordOf(JSON.parse(clean.slice(objectStart, objectEnd + 1))); } catch { /* 配列形式を下で試す */ } }
+    const arrayStart = clean.indexOf('['); const arrayEnd = clean.lastIndexOf(']');
+    if (arrayStart >= 0 && arrayEnd > arrayStart) { try { const parsed = JSON.parse(clean.slice(arrayStart, arrayEnd + 1)) as unknown; return Array.isArray(parsed) ? { cards: parsed, tasks: parsed } : null; } catch { return null; } }
+    return null;
+  }
 }
 
 function modelContent(value: unknown): string {
@@ -25,11 +34,11 @@ function modelContent(value: unknown): string {
 }
 function cleanCards(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.map(item => { const row = recordOf(item); return { front: String(row.front ?? '').trim(), back: String(row.back ?? '').trim(), subject: String(row.subject ?? 'その他').trim() || 'その他' }; }).filter(card => card.front && card.back).slice(0, 120);
+  return value.map(item => { const row = recordOf(item); return { front: String(row.front ?? row.term ?? row.word ?? row.question ?? row.prompt ?? '').trim(), back: String(row.back ?? row.meaning ?? row.translation ?? row.answer ?? row.explanation ?? '').trim(), subject: String(row.subject ?? row.deck ?? row.category ?? 'その他').trim() || 'その他' }; }).filter(card => card.front && card.back).slice(0, 120);
 }
 function cleanTasks(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.map(item => { const row = recordOf(item); return { title: String(row.title ?? '').trim(), subject: String(row.subject ?? '').trim(), dueDate: String(row.dueDate ?? '').trim(), body: String(row.body ?? '').trim() }; }).filter(task => task.title && (task.subject || task.body)).slice(0, 80);
+  return value.map(item => { const row = recordOf(item); return { title: String(row.title ?? row.name ?? row.assignment ?? '').trim(), subject: String(row.subject ?? row.class ?? '').trim(), dueDate: String(row.dueDate ?? row.deadline ?? '').trim(), body: String(row.body ?? row.description ?? row.todo ?? '').trim() }; }).filter(task => task.title && (task.subject || task.body)).slice(0, 80);
 }
 
 function recordOf(value: unknown): Record<string, unknown> {
@@ -99,13 +108,13 @@ export async function POST(request: Request) {
       if (!response.ok) throw new Error(await response.text());
       const result = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
       const parsed = parseJson(result.candidates?.[0]?.content?.parts?.[0]?.text ?? '');
-      tasks.push(...(mode === 'memorize' ? cleanCards(parsed?.cards) : cleanTasks(parsed?.tasks)));
+      tasks.push(...(mode === 'memorize' ? cleanCards(parsed?.cards ?? parsed?.items ?? parsed?.vocab ?? parsed?.flashcards) : cleanTasks(parsed?.tasks ?? parsed?.assignments ?? parsed?.items)));
     } else {
       const base = process.env.LOCAL_GEMMA_BASE_URL || 'http://127.0.0.1:1234/v1'; const model = await resolveLocalModel(base);
       const localKey = process.env.LOCAL_GEMMA_API_KEY?.trim();
       // ローカル推論はMacの性能や画像枚数によって時間がかかるため、APIより長めに待つ。
-      const parsed = await callVision(base, model, images, instruction, localKey ? { authorization: `Bearer ${localKey}` } : {}, 120_000) as { tasks?: unknown; cards?: unknown };
-      tasks.push(...(mode === 'memorize' ? cleanCards(parsed.cards) : cleanTasks(parsed.tasks)));
+      const parsed = await callVision(base, model, images, instruction, localKey ? { authorization: `Bearer ${localKey}` } : {}, 120_000) as { tasks?: unknown; cards?: unknown; items?: unknown; vocab?: unknown; flashcards?: unknown; assignments?: unknown };
+      tasks.push(...(mode === 'memorize' ? cleanCards(parsed.cards ?? parsed.items ?? parsed.vocab ?? parsed.flashcards) : cleanTasks(parsed.tasks ?? parsed.assignments ?? parsed.items)));
     }
     if (mode === 'memorize') { const unique = new Map<string, { front: string; back: string; subject: string }>(); for (const card of cleanCards(tasks)) unique.set(`${card.front}|${card.subject}`.toLowerCase(), card); return NextResponse.json({ cards: Array.from(unique.values()) }); }
     const unique = new Map<string, { title: string; subject: string; dueDate: string; body: string }>(); for (const task of cleanTasks(tasks)) unique.set(`${task.title}|${task.subject}`.toLowerCase(), task);
