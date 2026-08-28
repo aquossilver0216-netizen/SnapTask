@@ -11,11 +11,15 @@ function parseJson(text: string): Record<string, unknown> | null {
 }
 function cleanCards(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.map(item => { const row = item as Record<string, unknown>; return { front: String(row.front ?? '').trim(), back: String(row.back ?? '').trim(), subject: String(row.subject ?? 'その他').trim() || 'その他' }; }).filter(card => card.front && card.back).slice(0, 120);
+  return value.map(item => { const row = recordOf(item); return { front: String(row.front ?? '').trim(), back: String(row.back ?? '').trim(), subject: String(row.subject ?? 'その他').trim() || 'その他' }; }).filter(card => card.front && card.back).slice(0, 120);
 }
 function cleanTasks(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.map(item => { const row = item as Record<string, unknown>; return { title: String(row.title ?? '').trim(), subject: String(row.subject ?? '').trim(), dueDate: String(row.dueDate ?? '').trim(), body: String(row.body ?? '').trim() }; }).filter(task => task.title && (task.subject || task.body)).slice(0, 80);
+  return value.map(item => { const row = recordOf(item); return { title: String(row.title ?? '').trim(), subject: String(row.subject ?? '').trim(), dueDate: String(row.dueDate ?? '').trim(), body: String(row.body ?? '').trim() }; }).filter(task => task.title && (task.subject || task.body)).slice(0, 80);
+}
+
+function recordOf(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
 }
 
 async function callVision(url: string, model: string, images: Array<{ content: string }>, instruction: string, headers: Record<string, string> = {}) {
@@ -28,8 +32,12 @@ async function callVision(url: string, model: string, images: Array<{ content: s
 
 export async function POST(request: Request) {
   let body: Input; try { body = await request.json() as Input; } catch { return NextResponse.json({ error: 'Invalid request' }, { status: 400 }); }
-  const images = (body.images ?? []).filter(image => image.content).slice(0, 12) as Array<{ content: string }>;
+  const candidates = Array.isArray(body.images) ? body.images : [];
+  const images = candidates
+    .filter(image => typeof image?.content === 'string' && image.content.length > 0)
+    .slice(0, 12) as Array<{ content: string }>;
   if (!images.length) return NextResponse.json({ error: '写真がありません' }, { status: 400 });
+  if (images.some(image => image.content.length > 12_000_000)) return NextResponse.json({ error: '写真のサイズが大きすぎます。1枚12MB以下にしてください。' }, { status: 413 });
   const provider = body.provider === 'api' ? 'api' : 'gemma';
   const mode = body.mode === 'memorize' ? 'memorize' : 'tasks';
   const instruction = mode === 'memorize' ? memorizePrompt : prompt;
