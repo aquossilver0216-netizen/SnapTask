@@ -152,6 +152,17 @@ export default function Home() {
   }, [mounted]);
 
   useEffect(() => {
+    if (!mounted || provider !== 'gemma' || (screen !== 'add' && screen !== 'english')) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void fetch('/api/parse?check=gemma')
+        .then(response => { if (active) setGemmaStatus(response.ok ? 'ready' : 'offline'); })
+        .catch(() => { if (active) setGemmaStatus('offline'); });
+    }, 0);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [mounted, provider, screen]);
+
+  useEffect(() => {
     if (!mounted || !window.location.hash.startsWith('#share=')) return;
     const timer = window.setTimeout(() => {
       try {
