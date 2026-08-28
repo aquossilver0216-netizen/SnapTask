@@ -13,6 +13,8 @@
 
 課題と単語帳は端末のlocalStorageに保存されます。あとで大会向けにGeminiへ切り替える場合も、画面の選択とサーバー側ルートはそのまま使えます。
 
+提出前の公開・デモ・AI設定チェックは [`docs/submission-checklist.md`](docs/submission-checklist.md) を確認してください。
+
 ### 公開前チェック
 
 サーバーを起動した状態で `pnpm test:smoke http://localhost:3000` を実行すると、主要ページとAPIの基本応答を確認できます。ポート番号は起動時に表示されたものに置き換えてください。
