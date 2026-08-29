@@ -109,6 +109,44 @@ async function toPng(file: File): Promise<File> {
   return new File([blob], file.name.replace(/\.(heic|heif|jpe?g)$/i, '.png'), { type: 'image/png' });
 }
 function dataUrl(file: File) { return new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); }); }
+async function toApiImage(png: File): Promise<File> {
+  const objectUrl = URL.createObjectURL(png);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new window.Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error('画像を圧縮できません'));
+      element.src = objectUrl;
+    });
+    const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('画像を圧縮できません');
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('画像を圧縮できません')), 'image/jpeg', .8));
+    return new File([blob], png.name.replace(/\.png$/i, '.jpg'), { type: 'image/jpeg' });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+async function readApiResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) throw new Error(response.ok ? '解析結果が空でした。もう一度試してね。' : `解析サーバーエラー（${response.status}）`);
+  try { return JSON.parse(text) as T; } catch {
+    if (response.status === 413 || /request entity too large|payload too large|request body too large|too large/i.test(text)) {
+      throw new Error('画像の送信サイズが大きすぎます。写真を少し減らしてもう一度試してね。');
+    }
+    throw new Error(response.ok ? '解析結果を読み取れませんでした。もう一度試してね。' : `解析サーバーエラー（${response.status}）。しばらくしてから再試行してね。`);
+  }
+}
+function assertApiImageSize(images: Array<{ content: string }>) {
+  const total = images.reduce((sum, image) => sum + image.content.length, 0);
+  if (total > 3_400_000) throw new Error('画像の合計サイズが大きすぎます。写真を2〜3枚ずつに分けて試してね。');
+}
 function thumbnailDataUrl(file: File) { return new Promise<string>((resolve, reject) => { const objectUrl = URL.createObjectURL(file); const image = new window.Image(); image.onload = () => { const scale = Math.min(1, 1000 / Math.max(image.naturalWidth, image.naturalHeight)); const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale)); const context = canvas.getContext('2d'); if (!context) { URL.revokeObjectURL(objectUrl); reject(new Error('サムネイルを作成できません')); return; } context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height); context.drawImage(image, 0, 0, canvas.width, canvas.height); URL.revokeObjectURL(objectUrl); resolve(canvas.toDataURL('image/jpeg', .78).split(',')[1] ?? ''); }; image.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('サムネイルを作成できません')); }; image.src = objectUrl; }); }
 
 function FlashStudyPanel({ cards, index, known, revealed, finished, onReveal, onAnswer, onRestart, onClose }: { cards: Vocab[]; index: number; known: number; revealed: boolean; finished: boolean; onReveal: () => void; onAnswer: (known: boolean) => void; onRestart: () => void; onClose: () => void }) {
@@ -279,11 +317,11 @@ export default function Home() {
 
   async function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []); event.target.value = ''; if (!files.length) return; if (files.some(file => file.size > MAX_UPLOAD_BYTES)) { setMessage('写真は1枚12MB以下にしてください。'); return; } if (provider === 'api' && activeApiCount + files.length > apiLimit) { setMessage(`Gemini APIの今月の${premiumActive ? 'プレミアム' : '無料'}枠（${apiLimit}枚）を超えるため停止しました。残り${apiRemaining}枚です。`); setBillingOpen(!premiumActive); return; } setFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setReading(true); setMessage(''); setDraftTasks([]);
-    try { const images = []; const captured: SavedPhoto[] = []; for (const file of files) { const png = await toPng(file); images.push({ content: await dataUrl(png) }); try { const thumb = await thumbnailDataUrl(png); if (thumb) captured.push({ id: newId('photo'), name: file.name, dataUrl: thumb, createdAt: new Date().toISOString(), kind: 'task' }); } catch { /* 写真保存に失敗しても解析は続行 */ } } if (captured.length) savePhotos([...photos, ...captured]); const response = await fetch('/api/parse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider, images }) }); const payload = await response.json() as { tasks?: Array<{ title?: string; subject?: string; dueDate?: string; body?: string }>; error?: string }; if (!response.ok) throw new Error(payload.error ?? '解析に失敗しました'); if (provider === 'api') recordApiUsage(files.length); const parsed = (payload.tasks ?? []).map(item => ({ id: newId('task'), title: String(item.title ?? ''), subject: String(item.subject ?? ''), dueDate: String(item.dueDate ?? ''), body: String(item.body ?? ''), done: false })).filter(item => item.title); if (!parsed.length) throw new Error('課題を見つけられませんでした'); setDraftTasks(parsed); setMessage(`${parsed.length}件の課題を読み取りました。内容を確認して保存してね。`); } catch (error) { setMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setReading(false); }
+    try { const images: Array<{ content: string; mimeType: string }> = []; const captured: SavedPhoto[] = []; for (const file of files) { const png = await toPng(file); const apiImage = await toApiImage(png); images.push({ content: await dataUrl(apiImage), mimeType: apiImage.type }); try { const thumb = await thumbnailDataUrl(png); if (thumb) captured.push({ id: newId('photo'), name: file.name, dataUrl: thumb, createdAt: new Date().toISOString(), kind: 'task' }); } catch { /* 写真保存に失敗しても解析は続行 */ } } assertApiImageSize(images); if (captured.length) savePhotos([...photos, ...captured]); const response = await fetch('/api/parse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider, images }) }); const payload = await readApiResponse<{ tasks?: Array<{ title?: string; subject?: string; dueDate?: string; body?: string }>; error?: string }>(response); if (!response.ok) throw new Error(payload.error ?? '解析に失敗しました'); if (provider === 'api') recordApiUsage(files.length); const parsed = (payload.tasks ?? []).map(item => ({ id: newId('task'), title: String(item.title ?? ''), subject: String(item.subject ?? ''), dueDate: String(item.dueDate ?? ''), body: String(item.body ?? ''), done: false })).filter(item => item.title); if (!parsed.length) throw new Error('課題を見つけられませんでした'); setDraftTasks(parsed); setMessage(`${parsed.length}件の課題を読み取りました。内容を確認して保存してね。`); } catch (error) { setMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setReading(false); }
   }
   async function chooseMemoryPhoto(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []); event.target.value = ''; if (!files.length) return; if (files.some(file => file.size > MAX_UPLOAD_BYTES)) { setMemoryMessage('写真は1枚12MB以下にしてください。'); return; } if (provider === 'api' && activeApiCount + files.length > apiLimit) { setMemoryMessage(`Gemini APIの今月の${premiumActive ? 'プレミアム' : '無料'}枠（${apiLimit}枚）を超えるため停止しました。残り${apiRemaining}枚です。`); setBillingOpen(!premiumActive); return; } setMemoryFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setMemoryReading(true); setMemoryMessage('');
-    try { const images = []; const captured: SavedPhoto[] = []; for (const file of files) { const png = await toPng(file); images.push({ content: await dataUrl(png) }); try { const thumb = await thumbnailDataUrl(png); if (thumb) captured.push({ id: newId('photo'), name: file.name, dataUrl: thumb, createdAt: new Date().toISOString(), kind: 'memory' }); } catch { /* 写真保存に失敗しても解析は続行 */ } } if (captured.length) savePhotos([...photos, ...captured]); const response = await fetch('/api/parse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider, mode: 'memorize', images }) }); const payload = await response.json() as { cards?: Array<{ front?: string; back?: string; subject?: string }>; error?: string }; if (!response.ok) throw new Error(payload.error ?? '解析に失敗しました'); if (provider === 'api') recordApiUsage(files.length); const parsed = (payload.cards ?? []).map(item => ({ id: newId('vocab'), term: String(item.front ?? ''), meaning: String(item.back ?? ''), subject: String(item.subject ?? 'その他') })).filter(item => item.term && item.meaning); if (!parsed.length) throw new Error('暗記項目を見つけられませんでした'); const merged = mergeVocab(vocab, parsed); const added = merged.length - vocab.length; saveVocab(merged); setDeck(parsed[0].subject); setMemoryMessage(added ? `${added}件を${parsed[0].subject}の暗記ページに追加しました！` : '読み取ったカードはすべて登録済みでした。'); } catch (error) { setMemoryMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setMemoryReading(false); }
+    try { const images: Array<{ content: string; mimeType: string }> = []; const captured: SavedPhoto[] = []; for (const file of files) { const png = await toPng(file); const apiImage = await toApiImage(png); images.push({ content: await dataUrl(apiImage), mimeType: apiImage.type }); try { const thumb = await thumbnailDataUrl(png); if (thumb) captured.push({ id: newId('photo'), name: file.name, dataUrl: thumb, createdAt: new Date().toISOString(), kind: 'memory' }); } catch { /* 写真保存に失敗しても解析は続行 */ } } assertApiImageSize(images); if (captured.length) savePhotos([...photos, ...captured]); const response = await fetch('/api/parse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider, mode: 'memorize', images }) }); const payload = await readApiResponse<{ cards?: Array<{ front?: string; back?: string; subject?: string }>; error?: string }>(response); if (!response.ok) throw new Error(payload.error ?? '解析に失敗しました'); if (provider === 'api') recordApiUsage(files.length); const parsed = (payload.cards ?? []).map(item => ({ id: newId('vocab'), term: String(item.front ?? ''), meaning: String(item.back ?? ''), subject: String(item.subject ?? 'その他') })).filter(item => item.term && item.meaning); if (!parsed.length) throw new Error('暗記項目を見つけられませんでした'); const merged = mergeVocab(vocab, parsed); const added = merged.length - vocab.length; saveVocab(merged); setDeck(parsed[0].subject); setMemoryMessage(added ? `${added}件を${parsed[0].subject}の暗記ページに追加しました！` : '読み取ったカードはすべて登録済みでした。'); } catch (error) { setMemoryMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setMemoryReading(false); }
   }
   function updateDraft(index: number, field: keyof Task, value: string) { setDraftTasks(current => current.map((item, i) => i === index ? { ...item, [field]: value } : item)); }
   function saveDraft() { const validTasks = draftTasks.filter(task => task.title.trim()); if (!validTasks.length) { setMessage('課題名を1件以上入力してください。'); return; } const merged = mergeTasks(tasks, validTasks); const added = merged.length - tasks.length; saveTasks(merged); setDraftTasks([]); setFileName(''); setMessage(added ? `${added}件の課題を保存しました！` : '読み取った課題はすべて登録済みでした。'); setScreen('home'); }

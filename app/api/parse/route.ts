@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 type Provider = 'gemma' | 'api';
-type Input = { provider?: Provider; mode?: 'tasks' | 'memorize'; images?: Array<{ content?: string }> };
+type Input = { provider?: Provider; mode?: 'tasks' | 'memorize'; images?: Array<{ content?: string; mimeType?: string }> };
 const prompt = `高校生向けのプリント・黒板写真を、提出物の一覧に変換してください。複数画像は同じプリントの続きとしてまとめて読み、画像に書かれている内容だけを使ってください。推測で補完したり、課題ではない説明文・ページ番号だけを課題にしたりしないでください。写真内の表や箇条書きは行ごとの対応を保ち、同じ課題を重複させないでください。JSONだけを返してください（Markdownや前置きは禁止）。\n{"tasks":[{"title":"写真に書かれた課題名","subject":"教科名","dueDate":"YYYY-MM-DDまたは空文字","body":"写真に書かれた提出物・やることの要約"}]}\n課題は見つかった分を漏れなく抽出してください。締切が明記されていない場合はdueDateを空文字にし、日付を勝手に作らないでください。日付が「8/30」「8月30日」のように年なしの場合は現在年を使ってください。`;
 const memorizePrompt = `学校の教材写真を、復習できる暗記カードに変換してください。複数画像は同じ教材の続きとしてまとめて読み、写真にある文字をできるだけ正確に転記してください。英単語の綴り、記号、数式、年号、固有名詞を変更しないでください。左右の列や表の行は正しい意味同士を組み合わせ、見出しだけ・ページ番号だけのカードは作らないでください。教科は写真の内容から判断し、判断できなければ「その他」にしてください。推測や一般知識で補完せず、JSONだけを返してください（Markdownや前置きは禁止）。\n{"cards":[{"front":"覚える語句・問題・公式","back":"写真に書かれた答え・説明・意味","subject":"英語 / 数学 / 理科 / 社会 / 国語 / その他"}]}\n写真にある重要事項を1行1カードで漏れなく抽出し、同じカードは重複させないでください。`;
 
@@ -95,9 +95,15 @@ function gemmaErrorMessage(error: unknown): string {
   return 'Gemmaに接続できませんでした。Bionic / LM Studioで http://127.0.0.1:1234/v1 を起動してください。';
 }
 
-async function callVision(url: string, model: string, images: Array<{ content: string }>, instruction: string, headers: Record<string, string> = {}, timeoutMs = 45_000) {
+function normalizeImageMimeType(value: unknown) {
+  const mime = typeof value === 'string' ? value.toLowerCase() : '';
+  if (mime === 'image/jpg') return 'image/jpeg';
+  return /^image\/(png|jpeg|webp)$/.test(mime) ? mime : 'image/png';
+}
+
+async function callVision(url: string, model: string, images: Array<{ content: string; mimeType: string }>, instruction: string, headers: Record<string, string> = {}, timeoutMs = 45_000) {
   // Bionic / LM Studioの互換実装にはdetailフィールドを受け付けないものがあるため、最小形式で送る。
-  const content = [{ type: 'text', text: instruction }, ...images.map(image => ({ type: 'image_url', image_url: { url: `data:image/png;base64,${image.content}` } }))];
+  const content = [{ type: 'text', text: instruction }, ...images.map(image => ({ type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.content}` } }))];
   const response = await fetch(`${url.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ model, temperature: 0, max_tokens: 4096, messages: [{ role: 'user', content }] }), signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) throw new Error(await response.text());
   const result = await response.json() as { choices?: Array<{ message?: { content?: unknown }; text?: unknown }> };
@@ -127,7 +133,8 @@ export async function POST(request: Request) {
   const candidates = Array.isArray(body.images) ? body.images : [];
   const images = candidates
     .filter(image => typeof image?.content === 'string' && image.content.length > 0)
-    .slice(0, 12) as Array<{ content: string }>;
+    .slice(0, 12)
+    .map(image => ({ content: image.content as string, mimeType: normalizeImageMimeType(image.mimeType) }));
   if (!images.length) return NextResponse.json({ error: '写真がありません' }, { status: 400 });
   if (images.some(image => image.content.length > 12_000_000)) return NextResponse.json({ error: '写真のサイズが大きすぎます。1枚12MB以下にしてください。' }, { status: 413 });
   const provider = body.provider === 'api' ? 'api' : 'gemma';
@@ -139,7 +146,7 @@ export async function POST(request: Request) {
       const key = process.env.GEMINI_API_KEY;
       if (!key) return NextResponse.json({ error: 'GEMINI_API_KEYが未設定です' }, { status: 503 });
       const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-      const parts = [{ text: instruction }, ...images.map(image => ({ inline_data: { mime_type: 'image/png', data: image.content } }))];
+      const parts = [{ text: instruction }, ...images.map(image => ({ inline_data: { mime_type: image.mimeType, data: image.content } }))];
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } }), signal: AbortSignal.timeout(45_000) });
       if (!response.ok) throw new Error(await response.text());
       const result = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
