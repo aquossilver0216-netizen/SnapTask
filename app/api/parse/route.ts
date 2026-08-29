@@ -135,6 +135,26 @@ function normalizeGeminiModel(value: string | undefined) {
   return (value ?? '').trim().replace(/^models\//, '') || defaultGeminiModel;
 }
 
+async function resolveGeminiModel(key: string, configured: string | undefined) {
+  const preferred = normalizeGeminiModel(configured);
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(4_000) });
+    if (!response.ok) return preferred;
+    const payload = await response.json() as { models?: Array<{ name?: unknown; supportedGenerationMethods?: unknown }> };
+    const available = (payload.models ?? []).map(item => {
+      const name = typeof item.name === 'string' ? item.name.replace(/^models\//, '').trim() : '';
+      const methods = Array.isArray(item.supportedGenerationMethods) ? item.supportedGenerationMethods.map(String) : [];
+      return { name, methods };
+    }).filter(item => item.name && item.methods.includes('generateContent'));
+    if (available.some(item => item.name === preferred)) return preferred;
+    // Flash系を優先し、画像を扱える generateContent 対応モデルを選ぶ。
+    const flash = available.find(item => /flash/i.test(item.name));
+    return flash?.name || available[0]?.name || preferred;
+  } catch {
+    return preferred;
+  }
+}
+
 async function callGemini(key: string, requestedModel: string, parts: Array<Record<string, unknown>>) {
   const models = Array.from(new Set([normalizeGeminiModel(requestedModel), defaultGeminiModel]));
   let lastError = '';
@@ -191,7 +211,7 @@ export async function POST(request: Request) {
     if (provider === 'api') {
       const key = process.env.GEMINI_API_KEY?.trim();
       if (!key) return NextResponse.json({ error: 'GEMINI_API_KEYが未設定です' }, { status: 503 });
-      const model = normalizeGeminiModel(process.env.GEMINI_MODEL);
+      const model = await resolveGeminiModel(key, process.env.GEMINI_MODEL);
       const parts = [{ text: instruction }, ...images.map(image => ({ inline_data: { mime_type: image.mimeType, data: image.content } }))];
       const result = await callGemini(key, model, parts);
       const parsed = parseJson(result.candidates?.[0]?.content?.parts?.[0]?.text ?? '');
