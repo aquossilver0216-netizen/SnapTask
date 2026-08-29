@@ -13,6 +13,7 @@ type Provider = 'gemma' | 'api';
 type MemoryMode = 'list' | 'flash' | 'quiz';
 type GemmaStatus = 'unknown' | 'checking' | 'ready' | 'offline';
 type ApiConfigStatus = 'unknown' | 'ready' | 'missing';
+type WorkspaceResult = { kind: 'task' | 'deck' | 'card'; title: string; subtitle: string; subject?: string };
 
 const starterTasks: Task[] = [
   { id: 'task-1', title: '数学ワーク p.24〜27', subject: '数学', dueDate: '2026-08-30', body: '問題を解いて提出する', done: false },
@@ -175,6 +176,7 @@ export default function Home() {
   const [shareDeck, setShareDeck] = useState(''); const [shareMessage, setShareMessage] = useState(''); const [deckNames, setDeckNames] = useState<string[]>(defaultDeckNames);
   const [manageOpen, setManageOpen] = useState(false); const [apiConfigStatus, setApiConfigStatus] = useState<ApiConfigStatus>('unknown'); const [billingOpen, setBillingOpen] = useState(false); const [billingError, setBillingError] = useState(''); const [billingLoading, setBillingLoading] = useState(false);
   const [gemmaStatus, setGemmaStatus] = useState<GemmaStatus>('unknown');
+  const [workspaceQuery, setWorkspaceQuery] = useState(''); const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false);
   const providerTouched = useRef(false);
 
   function selectProvider(next: Provider) { providerTouched.current = true; setProvider(next); }
@@ -253,6 +255,19 @@ export default function Home() {
   }, [mounted, provider, screen]);
 
   useEffect(() => {
+    if (!mounted) return;
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'k') {
+        event.preventDefault();
+        setWorkspaceSearchOpen(current => !current);
+      }
+      if (event.key === 'Escape') setWorkspaceSearchOpen(false);
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [mounted]);
+
+  useEffect(() => {
     if (!mounted || !window.location.hash.startsWith('#share=')) return;
     const timer = window.setTimeout(() => {
       try {
@@ -280,6 +295,14 @@ export default function Home() {
   const subjects = useMemo(() => ['すべて', ...Array.from(new Set(tasks.map(task => task.subject).filter(Boolean)))], [tasks]);
   const decks = Array.from(new Set([...deckNames, ...vocab.map(item => item.subject)]));
   const shareableDecks = decks.filter(name => vocab.some(card => card.subject === name));
+  const workspaceResults: WorkspaceResult[] = (() => {
+    const query = workspaceQuery.trim().toLocaleLowerCase();
+    if (!query) return [];
+    const taskResults = tasks.filter(task => `${task.title} ${task.subject} ${task.body}`.toLocaleLowerCase().includes(query)).slice(0, 5).map(task => ({ kind: 'task' as const, title: task.title, subtitle: `${task.subject} · ${formatDue(task.dueDate)}` }));
+    const deckResults = decks.filter(name => name.toLocaleLowerCase().includes(query)).slice(0, 5).map(name => ({ kind: 'deck' as const, title: name, subtitle: `${vocab.filter(card => card.subject === name).length}項目の暗記ページ` }));
+    const cardResults = vocab.filter(card => `${card.term} ${card.meaning} ${card.subject}`.toLocaleLowerCase().includes(query)).slice(0, 6).map(card => ({ kind: 'card' as const, title: card.term, subtitle: card.meaning, subject: card.subject }));
+    return [...taskResults, ...deckResults, ...cardResults].slice(0, 12);
+  })();
   const selectedShareDeck = shareableDecks.includes(shareDeck) ? shareDeck : (shareableDecks[0] ?? '');
   const deckWords = useMemo(() => vocab.filter(item => item.subject === deck), [vocab, deck]);
   const wrongDeckWords = useMemo(() => deckWords.filter(item => wrongIds.includes(item.id)), [deckWords, wrongIds]);
@@ -354,12 +377,35 @@ export default function Home() {
   function startFlash() { if (!deckWords.length) { setEnglishMessage('一周学習にはカードが必要です。'); return; } setFlashIndex(0); setFlashKnown(0); setFlashRevealed(false); setFlashFinished(false); setMemoryMode('flash'); setReviewWrongOnly(false); }
   function answerFlash(known: boolean) { const card = deckWords[flashIndex]; if (!card || !flashRevealed) return; recordQuizAnswer(known); if (known) { setFlashKnown(value => value + 1); setWrongIds(current => { const next = current.filter(id => id !== card.id); localStorage.setItem('snaptask-wrong-cards', JSON.stringify(next)); return next; }); } else { setWrongIds(current => { const next = Array.from(new Set([...current, card.id])); localStorage.setItem('snaptask-wrong-cards', JSON.stringify(next)); return next; }); } if (flashIndex + 1 >= deckWords.length) setFlashFinished(true); else { setFlashIndex(index => index + 1); setFlashRevealed(false); } }
   function answerQuiz(value: string) { if (quizSelected || !quizQuestion) return; setQuizSelected(value); const correct = value === quizQuestion.meaning; recordQuizAnswer(correct); if (correct) { setQuizScore(score => score + 1); setWrongIds(current => { const next = current.filter(id => id !== quizQuestion.id); localStorage.setItem('snaptask-wrong-cards', JSON.stringify(next)); return next; }); } else { setWrongIds(current => { const next = Array.from(new Set([...current, quizQuestion.id])); localStorage.setItem('snaptask-wrong-cards', JSON.stringify(next)); return next; }); } window.setTimeout(() => { if (quizIndex + 1 >= quizQuestions.length) setQuizFinished(true); else { setQuizIndex(index => index + 1); setQuizSelected(null); } }, 650); }
+  function openWorkspaceResult(result: WorkspaceResult) {
+    setWorkspaceSearchOpen(false);
+    setWorkspaceQuery('');
+    if (result.kind === 'task') { setScreen('home'); setTaskQuery(result.title); return; }
+    setDeck(result.kind === 'card' ? result.subject ?? '英語' : result.title);
+    setMemoryMode('list');
+    setReviewWrongOnly(false);
+    setScreen('english');
+  }
 
   // Serverとブラウザの初回HTMLを同じにして、保存データや日付によるHydration不一致を防ぐ。
   if (!mounted) return <main className="snap-shell app-loading" aria-busy="true" aria-live="polite"><span className="brand-dot">S</span><b>SnapTaskを準備中…</b></main>;
 
   return <main className="snap-shell">
-    <header className="snap-header"><button className="snap-brand" onClick={() => setScreen('home')}><span className="brand-dot">S</span><span><b>SnapTask</b><small>高校生のための提出物管理</small></span></button><button className="header-add" onClick={() => setScreen('add')}>＋ 写真を追加</button></header>
+    <aside className="workspace-sidebar" aria-label="ワークスペース">
+      <button className="sidebar-brand" onClick={() => setScreen('home')}><span className="brand-dot">S</span><span><b>SnapTask</b><small>マイワークスペース</small></span></button>
+      <button className="sidebar-search" onClick={() => setWorkspaceSearchOpen(true)}><span>⌕</span><b>検索</b><kbd>⌘ K</kbd></button>
+      <nav className="sidebar-nav" aria-label="メインメニュー">
+        <button className={screen === 'home' ? 'active' : ''} onClick={() => setScreen('home')}><span>⌂</span>ホーム</button>
+        <button className={screen === 'add' ? 'active' : ''} onClick={() => setScreen('add')}><span>＋</span>課題を追加</button>
+        <button className={screen === 'english' ? 'active' : ''} onClick={() => setScreen('english')}><span>暗</span>暗記</button>
+        <button className={screen === 'photos' ? 'active' : ''} onClick={() => setScreen('photos')}><span>▧</span>写真</button>
+        <button className={screen === 'share' ? 'active' : ''} onClick={() => { setScreen('share'); setShareDeck(shareableDecks[0] ?? ''); setShareMessage(''); }}><span>↗</span>共有</button>
+      </nav>
+      <div className="sidebar-section"><div className="sidebar-section-heading"><b>暗記ページ</b><button onClick={addDeck} aria-label="暗記ページを追加">＋</button></div>{decks.slice(0, 8).map(item => <button type="button" key={item} className={`sidebar-deck ${screen === 'english' && deck === item ? 'active' : ''}`} onClick={() => { setDeck(item); setMemoryMode('list'); setReviewWrongOnly(false); setScreen('english'); }}><span className="sidebar-deck-icon">{item.slice(0, 1)}</span><span>{item}</span><small>{vocab.filter(word => word.subject === item).length}</small></button>)}</div>
+      <div className="sidebar-footer"><span className="sidebar-footer-dot" />この端末に保存</div>
+    </aside>
+    {workspaceSearchOpen && <div className="workspace-search-backdrop" role="presentation" onClick={() => setWorkspaceSearchOpen(false)}><div className="workspace-search" role="dialog" aria-modal="true" aria-label="ワークスペースを検索" onClick={event => event.stopPropagation()}><div className="workspace-search-input"><span>⌕</span><input autoFocus value={workspaceQuery} onChange={event => setWorkspaceQuery(event.target.value)} placeholder="課題・暗記ページ・カードを検索" aria-label="課題・暗記ページ・カードを検索" /><kbd>esc</kbd></div>{workspaceQuery.trim() ? workspaceResults.length ? <div className="workspace-search-results">{workspaceResults.map((result, index) => <button type="button" key={`${result.kind}-${result.title}-${index}`} onClick={() => openWorkspaceResult(result)}><span className={`search-result-icon search-result-${result.kind}`}>{result.kind === 'task' ? '✓' : result.kind === 'deck' ? '▤' : '暗'}</span><span><b>{result.title}</b><small>{result.subtitle}</small></span><i>{result.kind === 'task' ? '課題' : result.kind === 'deck' ? '暗記ページ' : result.subject}</i></button>)}</div> : <p className="workspace-search-empty">一致するページがありません</p> : <p className="workspace-search-hint">⌘K ですぐ検索。課題名、教科、単語、説明から探せます。</p>}</div></div>}
+    <header className="snap-header"><button className="snap-brand" onClick={() => setScreen('home')}><span className="brand-dot">S</span><span><b>SnapTask</b><small>高校生のための提出物管理</small></span></button><div className="header-page-context">{screen === 'home' ? 'ホーム' : screen === 'add' ? '課題を追加' : screen === 'english' ? `暗記 / ${deck}` : screen === 'photos' ? '写真' : '共有'}</div><button className="header-add" onClick={() => setScreen('add')}>＋ 写真を追加</button></header>
     {screen === 'home' && <section className="snap-page"><div className="snap-hero"><div><p className="kicker">TODAY</p><h1>やることを、<em>撮って終わらせる。</em></h1><p>プリントや黒板を撮るだけで、提出物が締切順にまとまります。</p></div><div className="today-count"><strong>{tasks.filter(task => !task.done).length}</strong><span>未完了</span></div></div>
       {showGuide && <section className="guide-card tutorial-card" aria-labelledby="tutorial-title"><div className="tutorial-head"><div><p className="kicker">TUTORIAL</p><h2 id="tutorial-title">SnapTaskの使い方</h2><p>写真から始めて、提出と復習まで4ステップ。</p></div><button aria-label="チュートリアルを閉じる" onClick={dismissGuide}>×</button></div><div className="tutorial-progress" aria-label="チュートリアルの進行"><span>{tutorialSteps.map((step, index) => <button type="button" key={step.label} className={index === tutorialStep ? 'active' : index < tutorialStep ? 'is-done' : ''} onClick={() => setTutorialStep(index)} aria-label={`${index + 1} ${step.label}`}><i>{index < tutorialStep ? '✓' : index + 1}</i>{step.label}</button>)}</span><small>{tutorialStep + 1} / {tutorialSteps.length}</small></div><div className="tutorial-body"><span className="tutorial-number">0{tutorialStep + 1}</span><div><b>{tutorialSteps[tutorialStep].label}</b><h3>{tutorialSteps[tutorialStep].title}</h3><p>{tutorialSteps[tutorialStep].body}</p></div></div><div className="tutorial-actions">{tutorialStep > 0 && <button className="outline-button" onClick={() => setTutorialStep(step => step - 1)}>← 戻る</button>}{tutorialStep < tutorialSteps.length - 1 ? <button className="save-button" onClick={() => setTutorialStep(step => step + 1)}>次へ →</button> : <button className="save-button" onClick={() => { dismissGuide(); setScreen('add'); }}>写真を追加する →</button>}</div></section>}
       <div className="quick-actions"><button className="capture-card" onClick={() => setScreen('add')}><span className="capture-icon">▣</span><span><b>プリント・黒板を撮る</b><small>課題名・教科・締切を自動入力</small></span><i>→</i></button><button className="capture-card memory-action" onClick={() => setScreen('english')}><span className="capture-icon">暗</span><span><b>教材を暗記カードにする</b><small>教科を判別して整理・復習</small></span><i>→</i></button></div><button className="photo-library-link" onClick={() => setScreen('photos')}><span>▧</span><span><b>撮った写真を見る</b><small>{photos.length ? `${photos.length}枚を保存中` : '読み取りに使った写真を見返す'}</small></span><i>→</i></button>
