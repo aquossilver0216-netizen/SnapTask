@@ -139,11 +139,22 @@ async function callGemini(key: string, requestedModel: string, parts: Array<Reco
   const models = Array.from(new Set([normalizeGeminiModel(requestedModel), defaultGeminiModel]));
   let lastError = '';
   for (const model of models) {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } }), signal: AbortSignal.timeout(45_000) });
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+    let response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } }), signal: AbortSignal.timeout(45_000) });
+    // モデルやAPIの世代によってはresponseMimeTypeに対応していないため、JSON指示だけで再試行する。
+    if (!response.ok && response.status === 400) {
+      const firstError = await response.text();
+      if (/response.?mime.?type|response_mime_type/i.test(firstError)) {
+        response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0 } }), signal: AbortSignal.timeout(45_000) });
+      } else {
+        lastError = firstError;
+      }
+    }
     if (response.ok) return await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-    lastError = await response.text();
+    if (!lastError) lastError = await response.text();
     const canTryLatest = response.status === 404 && model !== defaultGeminiModel && /no longer available|not found|NOT_FOUND/i.test(lastError);
     if (!canTryLatest) throw new Error(lastError);
+    lastError = '';
   }
   throw new Error(lastError || 'Gemini model request failed');
 }
@@ -178,7 +189,7 @@ export async function POST(request: Request) {
   try {
     const tasks: unknown[] = [];
     if (provider === 'api') {
-      const key = process.env.GEMINI_API_KEY;
+      const key = process.env.GEMINI_API_KEY?.trim();
       if (!key) return NextResponse.json({ error: 'GEMINI_API_KEYが未設定です' }, { status: 503 });
       const model = normalizeGeminiModel(process.env.GEMINI_MODEL);
       const parts = [{ text: instruction }, ...images.map(image => ({ inline_data: { mime_type: image.mimeType, data: image.content } }))];
