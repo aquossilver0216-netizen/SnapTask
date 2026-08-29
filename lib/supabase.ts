@@ -113,6 +113,15 @@ export async function uploadRemotePhoto(session: AuthSession, storagePath: strin
   return storagePath;
 }
 
+export async function deleteRemotePhoto(session: AuthSession, storagePath: string) {
+  const config = requireConfig();
+  const response = await fetch(storagePathUrl(config.url, storagePath), {
+    method: 'DELETE',
+    headers: { apikey: config.key, Authorization: `Bearer ${session.access_token}` },
+  });
+  if (!response.ok) throw new Error('写真をクラウドから削除できませんでした。');
+}
+
 export async function createRemotePhotoUrl(session: AuthSession, storagePath: string, expiresIn = 60 * 60 * 24 * 7) {
   const config = requireConfig();
   const response = await fetch(`${config.url}/storage/v1/object/sign/${photoBucket}/${storagePath.split('/').map(encodeURIComponent).join('/')}`, {

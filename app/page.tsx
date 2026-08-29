@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
-import { AuthSession, fetchRemoteData, hydrateRemotePhotoUrls, isSupabaseConfigured, readGoogleSessionFromUrl, refreshSession, saveRemoteData, signOut, startGoogleSignIn, uploadRemotePhoto } from '../lib/supabase';
+import { AuthSession, deleteRemotePhoto, fetchRemoteData, hydrateRemotePhotoUrls, isSupabaseConfigured, readGoogleSessionFromUrl, refreshSession, saveRemoteData, signOut, startGoogleSignIn, uploadRemotePhoto } from '../lib/supabase';
 
 type Task = { id: string; title: string; subject: string; dueDate: string; body: string; done: boolean };
 type SavedPhoto = { id: string; name: string; dataUrl: string; createdAt: string; kind: 'task' | 'memory'; storagePath?: string; remoteUrl?: string };
@@ -93,9 +93,13 @@ function authErrorMessage(error: unknown) {
 async function toPng(file: File): Promise<File> {
   let source: Blob = file;
   if (/\.(heic|heif)$/i.test(file.name) || /image\/(heic|heif)/i.test(file.type)) {
-    const heic2any = (await import('heic2any')).default;
-    const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: .94 });
-    source = Array.isArray(converted) ? converted[0] : converted;
+    try {
+      const heic2any = (await import('heic2any')).default;
+      const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: .94 });
+      source = Array.isArray(converted) ? converted[0] : converted;
+    } catch {
+      throw new Error('HEIC画像を変換できませんでした。iPhoneの共有設定で「互換性優先」を選ぶか、写真をJPEGで保存してから再試行してね。');
+    }
   }
   let bitmap: ImageBitmap | null = null;
   let image: HTMLImageElement | null = null;
@@ -444,7 +448,7 @@ export default function Home() {
       if (activeProvider === 'api') recordApiUsage(files.length);
       const parsed = (payload.tasks ?? []).map(item => ({ id: newId('task'), title: String(item.title ?? ''), subject: String(item.subject ?? ''), dueDate: String(item.dueDate ?? ''), body: String(item.body ?? ''), done: false })).filter(item => item.title);
       if (!parsed.length) throw new Error('課題は見つかりませんでした。単語・公式の写真なら「暗記」ページで読み取ってね。'); setDraftTasks(parsed); setMessage(`${parsed.length}件の課題を読み取りました。内容を確認して保存してね。`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setReading(false); }
+    } catch (error) { setMessage(error instanceof Error ? error.message : '画像をPNGに変換できず、読み取れませんでした。JPEGまたはPNGで再試行してね。'); } finally { setReading(false); }
   }
   async function chooseMemoryPhoto(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []); event.target.value = '';
@@ -462,12 +466,19 @@ export default function Home() {
       if (activeProvider === 'api') recordApiUsage(files.length);
       const parsed = (payload.cards ?? []).map(item => ({ id: newId('vocab'), term: String(item.front ?? ''), meaning: String(item.back ?? ''), subject: String(item.subject ?? 'その他') })).filter(item => item.term && item.meaning);
       if (!parsed.length) throw new Error('暗記項目を見つけられませんでした'); const merged = mergeVocab(vocab, parsed); const added = merged.length - vocab.length; saveVocab(merged); setDeck(parsed[0].subject); setMemoryMessage(added ? `${added}件を${parsed[0].subject}の暗記ページに追加しました！` : '読み取ったカードはすべて登録済みでした。');
-    } catch (error) { setMemoryMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setMemoryReading(false); }
+    } catch (error) { setMemoryMessage(error instanceof Error ? error.message : '画像をPNGに変換できず、読み取れませんでした。JPEGまたはPNGで再試行してね。'); } finally { setMemoryReading(false); }
   }
   function updateDraft(index: number, field: keyof Task, value: string) { setDraftTasks(current => current.map((item, i) => i === index ? { ...item, [field]: value } : item)); }
   function saveDraft() { const validTasks = draftTasks.filter(task => task.title.trim()); if (!validTasks.length) { setMessage('課題名を1件以上入力してください。'); return; } const merged = mergeTasks(tasks, validTasks); const added = merged.length - tasks.length; saveTasks(merged); setDraftTasks([]); setFileName(''); setMessage(added ? `${added}件の課題を保存しました！` : '読み取った課題はすべて登録済みでした。'); setScreen('home'); }
   function toggleTask(id: string) { const target = tasks.find(task => task.id === id); if (!target) return; saveTasks(tasks.map(task => task.id === id ? { ...task, done: !task.done } : task)); recordCompleted(target.done ? -1 : 1); }
   function removeTask(id: string) { const target = tasks.find(task => task.id === id); if (target && window.confirm(`「${target.title}」を削除しますか？`)) saveTasks(tasks.filter(task => task.id !== id)); }
+  function removePhoto(id: string) {
+    const target = photos.find(photo => photo.id === id);
+    if (!target || !window.confirm(`「${target.name}」を写真一覧から削除しますか？`)) return;
+    savePhotos(photos.filter(photo => photo.id !== id));
+    if (selectedPhoto?.id === id) setSelectedPhoto(null);
+    if (authSession && target.storagePath) void deleteRemotePhoto(authSession, target.storagePath).catch(() => { /* 一覧からは削除済み。次回の同期で再送しない */ });
+  }
   function removeWord(id: string) { const target = vocab.find(card => card.id === id); if (target && window.confirm(`「${target.term}」を暗記カードから削除しますか？`)) { saveVocab(vocab.filter(card => card.id !== id)); setWrongIds(current => { const next = current.filter(cardId => cardId !== id); localStorage.setItem('snaptask-wrong-cards', JSON.stringify(next)); return next; }); } }
   function moveWord(id: string, subjectName: string) { const next = vocab.map(card => card.id === id ? { ...card, subject: subjectName } : card); saveVocab(next); if (shareDeck === vocab.find(card => card.id === id)?.subject) setShareDeck(subjectName); }
   function addDeck() { const value = window.prompt('教科・暗記ページの名前'); const name = value?.trim(); if (!name) return; if (decks.some(item => item.toLocaleLowerCase() === name.toLocaleLowerCase())) { setEnglishMessage('同じ名前の単語帳がすでにあります。'); setDeck(name); return; } saveDeckNames([...decks, name]); setDeck(name); setMemoryMode('list'); setReviewWrongOnly(false); setEnglishMessage(`「${name}」の単語帳を作りました。`); }
@@ -545,7 +556,7 @@ export default function Home() {
     {provider === 'gemma' && (screen === 'add' || screen === 'english') && <div className={`gemma-status gemma-${gemmaStatus}`}><span>{gemmaStatus === 'ready' ? '● Gemma接続中' : gemmaStatus === 'offline' ? '● Gemma未接続' : gemmaStatus === 'checking' ? '○ 接続確認中…' : '○ Gemma接続を確認'}</span><button onClick={checkGemma} disabled={gemmaStatus === 'checking'}>{gemmaStatus === 'offline' ? '再確認' : '確認'}</button>{gemmaStatus === 'offline' && <button className="gemma-switch" onClick={() => selectProvider('api')}>Geminiへ</button>}</div>}
     {screen === 'english' && !manageOpen && memoryMode !== 'flash' && <button className="organize-launch" onClick={() => setManageOpen(true)} disabled={!deckWords.length}>カードを整理</button>}
     {screen === 'english' && manageOpen && <MoveCardPanel cards={deckWords} decks={decks} onMove={moveWord} onClose={() => setManageOpen(false)} />}
-    {selectedPhoto && <div className="photo-viewer-backdrop" role="presentation" onClick={() => setSelectedPhoto(null)}><div className="photo-viewer" role="dialog" aria-modal="true" aria-label="写真を表示" onClick={event => event.stopPropagation()}><button className="modal-close" onClick={() => setSelectedPhoto(null)} aria-label="閉じる">×</button><Image src={selectedPhoto.remoteUrl || `data:image/jpeg;base64,${selectedPhoto.dataUrl}`} alt={selectedPhoto.name} width={1000} height={760} unoptimized /><b>{selectedPhoto.name}</b><small>{selectedPhoto.kind === 'memory' ? '暗記カード' : '課題'}として読み取り{selectedPhoto.storagePath ? ' ・ クラウド保存' : ''}</small></div></div>}
+    {selectedPhoto && <div className="photo-viewer-backdrop" role="presentation" onClick={() => setSelectedPhoto(null)}><div className="photo-viewer" role="dialog" aria-modal="true" aria-label="写真を表示" onClick={event => event.stopPropagation()}><button className="modal-close" onClick={() => setSelectedPhoto(null)} aria-label="閉じる">×</button><Image src={selectedPhoto.remoteUrl || `data:image/jpeg;base64,${selectedPhoto.dataUrl}`} alt={selectedPhoto.name} width={1000} height={760} unoptimized /><b>{selectedPhoto.name}</b><small>{selectedPhoto.kind === 'memory' ? '暗記カード' : '課題'}として読み取り{selectedPhoto.storagePath ? ' ・ クラウド保存' : ''}</small><button className="photo-delete-button" onClick={() => removePhoto(selectedPhoto.id)}>この写真を削除</button></div></div>}
     {billingOpen && <div className="modal-backdrop" role="presentation" onClick={() => setBillingOpen(false)}><div className="billing-modal" role="dialog" aria-modal="true" aria-labelledby="billing-title" onClick={event => event.stopPropagation()}><button className="modal-close" onClick={() => setBillingOpen(false)} aria-label="閉じる">×</button><span className="premium-kicker">PREMIUM</span><h2 id="billing-title">写真の読み取り枚数を増やす</h2><p>無料枠は月20枚。プレミアムなら月300枚までGeminiで読み取れます。</p><div className="plan-price"><strong>¥480</strong><span>/ 月（予定）</span></div><ul><li>写真からの課題・暗記カード作成 月300枚</li><li>HEIC・JPGの自動PNG変換</li><li>手入力・学習記録は今まで通り無料</li></ul><button className="save-button" onClick={startCheckout} disabled={billingLoading}>{billingLoading ? '決済ページを準備中…' : '購入ページへ進む →'}</button>{billingError && <small className="billing-error">{billingError}<br />Stripeの決済情報をVercelに設定すると有効になります。</small>}<small className="billing-note">決済設定が未完了の間は、課金は発生しません。</small></div></div>}
   </main>;
 }
