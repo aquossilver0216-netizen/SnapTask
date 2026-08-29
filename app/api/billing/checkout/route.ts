@@ -40,9 +40,10 @@ export async function POST(request: Request) {
     'line_items[0][quantity]': '1',
     success_url: `${appUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${appUrl}/?checkout=cancelled`,
+    'metadata[product]': 'snaptask-premium',
     'subscription_data[metadata][product]': 'snaptask-premium',
   });
-  if (userId) { params.set('client_reference_id', userId); params.set('subscription_data[metadata][user_id]', userId); }
+  if (userId) { params.set('client_reference_id', userId); params.set('metadata[user_id]', userId); params.set('subscription_data[metadata][user_id]', userId); }
   if (email) params.set('customer_email', email);
   const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',

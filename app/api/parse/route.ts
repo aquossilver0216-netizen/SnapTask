@@ -6,6 +6,7 @@ export const maxDuration = 60;
 
 type Provider = 'gemma' | 'api';
 type Input = { provider?: Provider; mode?: 'tasks' | 'memorize'; images?: Array<{ content?: string; mimeType?: string }> };
+type QuotaResult = { userId: string; month: string; count: number; limit: number };
 const defaultGeminiModel = 'gemini-3.6-flash';
 const prompt = `高校生向けのプリント・黒板写真を、提出物の一覧に変換してください。複数画像は同じプリントの続きとしてまとめて読み、画像に書かれている内容だけを使ってください。推測で補完したり、課題ではない説明文・ページ番号だけを課題にしたりしないでください。写真内の表や箇条書きは行ごとの対応を保ち、同じ課題を重複させないでください。JSONだけを返してください（Markdownや前置きは禁止）。\n{"tasks":[{"title":"写真に書かれた課題名","subject":"教科名","dueDate":"YYYY-MM-DDまたは空文字","body":"写真に書かれた提出物・やることの要約"}]}\n課題は見つかった分を漏れなく抽出してください。締切が明記されていない場合はdueDateを空文字にし、日付を勝手に作らないでください。日付が「8/30」「8月30日」のように年なしの場合は現在年を使ってください。`;
 const memorizePrompt = `学校の教材写真を、復習できる暗記カードに変換してください。複数画像は同じ教材の続きとしてまとめて読み、写真にある文字をできるだけ正確に転記してください。英単語の綴り、記号、数式、年号、固有名詞を変更しないでください。左右の列や表の行は正しい意味同士を組み合わせ、見出しだけ・ページ番号だけのカードは作らないでください。教科は写真の内容から判断し、判断できなければ「その他」にしてください。推測や一般知識で補完せず、JSONだけを返してください（Markdownや前置きは禁止）。\n{"cards":[{"front":"覚える語句・問題・公式","back":"写真に書かれた答え・説明・意味","subject":"英語 / 数学 / 理科 / 社会 / 国語 / その他"}]}\n写真にある重要事項を1行1カードで漏れなく抽出し、同じカードは重複させないでください。`;
@@ -124,6 +125,32 @@ function normalizeImageMimeType(value: unknown) {
   return /^image\/(png|jpeg|webp)$/.test(mime) ? mime : 'image/png';
 }
 
+async function reserveApiUsage(request: Request, amount: number): Promise<QuotaResult | { error: string; status: number }> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, '');
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!supabaseUrl || !anonKey || !serviceKey) return { error: '写真解析の利用設定が未完了です。管理者がSupabaseのサーバーキーを設定してください。', status: 503 };
+  const authorization = request.headers.get('authorization');
+  if (!authorization?.startsWith('Bearer ')) return { error: '写真解析を使うには、先にアカウント登録またはログインをしてください。', status: 401 };
+  const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, { headers: { apikey: anonKey, Authorization: authorization } });
+  if (!userResponse.ok) return { error: 'ログインの有効期限が切れました。もう一度ログインしてください。', status: 401 };
+  const user = await userResponse.json() as { id?: unknown };
+  if (typeof user.id !== 'string') return { error: 'ログイン情報を確認できませんでした。', status: 401 };
+  const userId = user.id;
+  const month = new Date().toISOString().slice(0, 7);
+  const adminHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
+  const subscriptionResponse = await fetch(`${supabaseUrl}/rest/v1/snaptask_subscriptions?select=status&user_id=eq.${encodeURIComponent(userId)}&limit=1`, { headers: adminHeaders });
+  const subscriptionRows = subscriptionResponse.ok ? await subscriptionResponse.json() as Array<{ status?: string }> : [];
+  const limit = subscriptionRows[0]?.status === 'active' || subscriptionRows[0]?.status === 'trialing' ? 300 : 20;
+  const usageResponse = await fetch(`${supabaseUrl}/rest/v1/snaptask_api_usage?select=count&user_id=eq.${encodeURIComponent(userId)}&month=eq.${month}&limit=1`, { headers: adminHeaders });
+  const usageRows = usageResponse.ok ? await usageResponse.json() as Array<{ count?: unknown }> : [];
+  const count = Number(usageRows[0]?.count ?? 0);
+  if (!Number.isFinite(count) || count + amount > limit) return { error: `今月の写真解析枠（${limit}枚）に達したため停止しました。来月まで待つか、プレミアムプランを利用してください。`, status: 429 };
+  const saveResponse = await fetch(`${supabaseUrl}/rest/v1/snaptask_api_usage?on_conflict=user_id,month`, { method: 'POST', headers: { ...adminHeaders, 'content-type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: userId, month, count: count + amount, updated_at: new Date().toISOString() }) });
+  if (!saveResponse.ok) return { error: '写真解析の利用回数を保存できませんでした。しばらくしてから再試行してください。', status: 503 };
+  return { userId, month, count: count + amount, limit };
+}
+
 async function callVision(url: string, model: string, images: Array<{ content: string; mimeType: string }>, instruction: string, headers: Record<string, string> = {}, timeoutMs = 45_000) {
   // Bionic / LM Studioの互換実装にはdetailフィールドを受け付けないものがあるため、最小形式で送る。
   const content = [{ type: 'text', text: instruction }, ...images.map(image => ({ type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.content}` } }))];
@@ -211,11 +238,15 @@ export async function POST(request: Request) {
   const provider = body.provider === 'api' ? 'api' : 'gemma';
   const mode = body.mode === 'memorize' ? 'memorize' : 'tasks';
   const instruction = mode === 'memorize' ? `${memorizePrompt}\n${memorizeBoldFocus}` : prompt;
+  let quota: QuotaResult | null = null;
   try {
     const tasks: unknown[] = [];
     if (provider === 'api') {
       const key = process.env.GEMINI_API_KEY?.trim();
       if (!key) return NextResponse.json({ error: 'GEMINI_API_KEYが未設定です' }, { status: 503 });
+      const quotaResult = await reserveApiUsage(request, images.length);
+      if ('error' in quotaResult) return NextResponse.json({ error: quotaResult.error }, { status: quotaResult.status });
+      quota = quotaResult;
       const model = await resolveGeminiModel(key, process.env.GEMINI_MODEL);
       const parts = [{ text: instruction }, ...images.map(image => ({ inline_data: { mime_type: image.mimeType, data: image.content } }))];
       const result = await callGemini(key, model, parts);
@@ -228,9 +259,9 @@ export async function POST(request: Request) {
       const parsed = await callVision(base, model, images, instruction, localKey ? { authorization: `Bearer ${localKey}` } : {}, 120_000) as { tasks?: unknown; cards?: unknown; items?: unknown; vocab?: unknown; flashcards?: unknown; assignments?: unknown };
       tasks.push(...(mode === 'memorize' ? cleanCards(parsed.cards ?? parsed.items ?? parsed.vocab ?? parsed.flashcards) : cleanTasks(parsed.tasks ?? parsed.assignments ?? parsed.items)));
     }
-    if (mode === 'memorize') { const unique = new Map<string, { front: string; back: string; subject: string }>(); for (const card of cleanCards(tasks)) unique.set(`${card.front}|${card.subject}`.toLowerCase(), card); return NextResponse.json({ cards: Array.from(unique.values()) }); }
+    if (mode === 'memorize') { const unique = new Map<string, { front: string; back: string; subject: string }>(); for (const card of cleanCards(tasks)) unique.set(`${card.front}|${card.subject}`.toLowerCase(), card); return NextResponse.json({ cards: Array.from(unique.values()), usage: quota ? { count: quota.count, limit: quota.limit } : undefined }); }
     const unique = new Map<string, { title: string; subject: string; dueDate: string; body: string }>(); for (const task of cleanTasks(tasks)) unique.set(`${task.title}|${task.subject}`.toLowerCase(), task);
-    return NextResponse.json({ tasks: Array.from(unique.values()) });
+    return NextResponse.json({ tasks: Array.from(unique.values()), usage: quota ? { count: quota.count, limit: quota.limit } : undefined });
   } catch (error) { console.error('SnapTask AI parse failed', { provider, mode, reason: error instanceof Error ? error.message.slice(0, 400) : 'unknown' }); return NextResponse.json({ error: provider === 'gemma' ? gemmaErrorMessage(error) : geminiErrorMessage(error) }, { status: 503 }); }
 }
 

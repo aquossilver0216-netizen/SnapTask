@@ -37,7 +37,9 @@ create policy "users update own data" on public.snaptask_data for update using (
 
 写真のサムネイルは端末容量とプライバシーを守るためlocalStorageに残し、学習データ（課題・カード・記録）をクラウド同期します。
 
-Stripe Checkoutはログイン中のSupabaseユーザーをサーバー側で検証してから決済セッションへ紐づけます。`STRIPE_SECRET_KEY`、Price IDなどのStripe環境変数がVercelに設定されていれば、ログイン後の契約状況もアカウントごとに確認できます。
+Stripe Checkoutはログイン中のSupabaseユーザーをサーバー側で検証してから決済セッションへ紐づけます。`STRIPE_SECRET_KEY`、Price IDなどのStripe環境変数がVercelに設定されていれば、ログイン後の契約状況もアカウントごとに確認できます。返金・解約を反映するには、StripeのDevelopers → Webhooksで `https://snap-task-xi.vercel.app/api/billing/webhook` を登録し、`checkout.session.completed`、`customer.subscription.created`、`customer.subscription.updated`、`customer.subscription.deleted`を購読、Signing secretをVercelの `STRIPE_WEBHOOK_SECRET`へ保存してください。
+
+サーバー側のAPI枚数制限とStripe Webhookの書き込みには、Supabaseの `service_role`（またはsecret）キーをVercelの `SUPABASE_SERVICE_ROLE_KEY`へ登録します。これはサーバー専用で、`NEXT_PUBLIC_`を付けたり、画面やGitHubへ公開したりしないでください。API制限はログインユーザーごとに月20枚（契約中は300枚）で停止します。
 
 ホームの「チュートリアル」では、写真の追加、読み取り結果の確認、学習記録、ミス復習・共有の流れを4ステップで確認できます。途中のステップへ戻ることもできます。
 

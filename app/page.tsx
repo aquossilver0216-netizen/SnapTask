@@ -241,7 +241,7 @@ export default function Home() {
       if (remote && (Array.isArray(data.tasks) || Array.isArray(data.vocab))) {
         const nextTasks = normalizeTasks(data.tasks); const nextVocab = normalizeVocab(data.vocab); const storedDecks = Array.isArray(data.deckNames) ? data.deckNames.map(String).map(name => name.trim()).filter(Boolean) : [];
         const nextDecks = Array.from(new Set([...storedDecks, ...nextVocab.map(card => card.subject)])); const nextActivity = normalizeActivity(data.activity); const nextWrongIds = normalizeWrongIds(data.wrongIds); const nextGoal = Number(data.weeklyGoal);
-        setTasks(nextTasks); setVocab(nextVocab); setDeckNames(nextDecks.length ? nextDecks : defaultDeckNames); setActivity(nextActivity); setWrongIds(nextWrongIds); if (Number.isFinite(nextGoal) && nextGoal > 0) setWeeklyGoal(nextGoal);
+        const nextPhotos = normalizePhotos(data.photos); setTasks(nextTasks); setVocab(nextVocab); setDeckNames(nextDecks.length ? nextDecks : defaultDeckNames); setActivity(nextActivity); setWrongIds(nextWrongIds); if (nextPhotos.length) setPhotos(nextPhotos); if (Number.isFinite(nextGoal) && nextGoal > 0) setWeeklyGoal(nextGoal);
         localStorage.setItem('snaptask-tasks', JSON.stringify(nextTasks)); localStorage.setItem('snaptask-vocab', JSON.stringify(nextVocab)); localStorage.setItem('snaptask-decks', JSON.stringify(nextDecks.length ? nextDecks : defaultDeckNames)); localStorage.setItem('snaptask-activity', JSON.stringify(nextActivity)); localStorage.setItem('snaptask-wrong-cards', JSON.stringify(nextWrongIds)); if (Number.isFinite(nextGoal) && nextGoal > 0) localStorage.setItem('snaptask-weekly-goal', String(nextGoal));
         setSyncMessage('クラウドの学習データを読み込みました。');
       } else setSyncMessage('このアカウントにデータを保存していきます。');
@@ -263,10 +263,10 @@ export default function Home() {
   useEffect(() => {
     if (!mounted || !authSession || !authHydrated) return;
     const timer = window.setTimeout(() => {
-      void saveRemoteData(authSession, { tasks, vocab, deckNames, activity, weeklyGoal, wrongIds }).then(() => setSyncMessage('クラウドに同期しました。')).catch(() => setSyncMessage('同期に失敗しました。次回もう一度試します。'));
+      void saveRemoteData(authSession, { tasks, vocab, deckNames, activity, weeklyGoal, wrongIds, photos: photos.slice(-12) }).then(() => setSyncMessage('クラウドに同期しました。')).catch(() => setSyncMessage('同期に失敗しました。次回もう一度試します。'));
     }, 1200);
     return () => window.clearTimeout(timer);
-  }, [mounted, authSession, authHydrated, tasks, vocab, deckNames, activity, weeklyGoal, wrongIds]);
+  }, [mounted, authSession, authHydrated, tasks, vocab, deckNames, activity, weeklyGoal, wrongIds, photos]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -415,12 +415,40 @@ export default function Home() {
   }
 
   async function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []); event.target.value = ''; if (!files.length) return; if (files.some(file => file.size > MAX_UPLOAD_BYTES)) { setMessage('写真は1枚12MB以下にしてください。'); return; } if (activeProvider === 'api' && activeApiCount + files.length > apiLimit) { setMessage(`Gemini APIの今月の${premiumActive ? 'プレミアム' : '無料'}枠（${apiLimit}枚）を超えるため停止しました。残り${apiRemaining}枚です。`); setBillingOpen(!premiumActive); return; } setFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setReading(true); setMessage(''); setDraftTasks([]);
-    try { const images: Array<{ content: string; mimeType: string }> = []; const captured: SavedPhoto[] = []; for (const file of files) { const png = await toPng(file); const apiImage = await toApiImage(png); images.push({ content: await dataUrl(apiImage), mimeType: apiImage.type }); try { const thumb = await thumbnailDataUrl(png); if (thumb) captured.push({ id: newId('photo'), name: file.name, dataUrl: thumb, createdAt: new Date().toISOString(), kind: 'task' }); } catch { /* 写真保存に失敗しても解析は続行 */ } } assertApiImageSize(images); if (captured.length) savePhotos([...photos, ...captured]); const response = await fetch('/api/parse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: activeProvider, images }) }); const payload = await readApiResponse<{ tasks?: Array<{ title?: string; subject?: string; dueDate?: string; body?: string }>; error?: string }>(response); if (!response.ok) throw new Error(payload.error ?? '解析に失敗しました'); if (activeProvider === 'api') recordApiUsage(files.length); const parsed = (payload.tasks ?? []).map(item => ({ id: newId('task'), title: String(item.title ?? ''), subject: String(item.subject ?? ''), dueDate: String(item.dueDate ?? ''), body: String(item.body ?? ''), done: false })).filter(item => item.title); if (!parsed.length) throw new Error('課題は見つかりませんでした。単語・公式の写真なら「暗記」ページで読み取ってね。'); setDraftTasks(parsed); setMessage(`${parsed.length}件の課題を読み取りました。内容を確認して保存してね。`); } catch (error) { setMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setReading(false); }
+    const files = Array.from(event.target.files ?? []); event.target.value = '';
+    if (!files.length) return;
+    if (files.some(file => file.size > MAX_UPLOAD_BYTES)) { setMessage('写真は1枚12MB以下にしてください。'); return; }
+    if (activeProvider === 'api' && activeApiCount + files.length > apiLimit) { setMessage(`今月の写真解析枠（${apiLimit}枚）を超えるため停止しました。残り${apiRemaining}枚です。`); setBillingOpen(!premiumActive); return; }
+    setFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setReading(true); setMessage(''); setDraftTasks([]);
+    try {
+      const images: Array<{ content: string; mimeType: string }> = []; const captured: SavedPhoto[] = [];
+      for (const file of files) { const png = await toPng(file); const apiImage = await toApiImage(png); images.push({ content: await dataUrl(apiImage), mimeType: apiImage.type }); try { const thumb = await thumbnailDataUrl(png); if (thumb) captured.push({ id: newId('photo'), name: file.name, dataUrl: thumb, createdAt: new Date().toISOString(), kind: 'task' }); } catch { /* 写真保存に失敗しても解析は続行 */ } }
+      assertApiImageSize(images); if (captured.length) savePhotos([...photos, ...captured]);
+      const headers: HeadersInit = { 'content-type': 'application/json' }; if (authSession?.access_token) headers.Authorization = `Bearer ${authSession.access_token}`;
+      const response = await fetch('/api/parse', { method: 'POST', headers, body: JSON.stringify({ provider: activeProvider, images }) });
+      const payload = await readApiResponse<{ tasks?: Array<{ title?: string; subject?: string; dueDate?: string; body?: string }>; error?: string }>(response); if (!response.ok) throw new Error(payload.error ?? '解析に失敗しました');
+      if (activeProvider === 'api') recordApiUsage(files.length);
+      const parsed = (payload.tasks ?? []).map(item => ({ id: newId('task'), title: String(item.title ?? ''), subject: String(item.subject ?? ''), dueDate: String(item.dueDate ?? ''), body: String(item.body ?? ''), done: false })).filter(item => item.title);
+      if (!parsed.length) throw new Error('課題は見つかりませんでした。単語・公式の写真なら「暗記」ページで読み取ってね。'); setDraftTasks(parsed); setMessage(`${parsed.length}件の課題を読み取りました。内容を確認して保存してね。`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setReading(false); }
   }
   async function chooseMemoryPhoto(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []); event.target.value = ''; if (!files.length) return; if (files.some(file => file.size > MAX_UPLOAD_BYTES)) { setMemoryMessage('写真は1枚12MB以下にしてください。'); return; } if (activeProvider === 'api' && activeApiCount + files.length > apiLimit) { setMemoryMessage(`Gemini APIの今月の${premiumActive ? 'プレミアム' : '無料'}枠（${apiLimit}枚）を超えるため停止しました。残り${apiRemaining}枚です。`); setBillingOpen(!premiumActive); return; } setMemoryFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setMemoryReading(true); setMemoryMessage('');
-    try { const images: Array<{ content: string; mimeType: string }> = []; const captured: SavedPhoto[] = []; for (const file of files) { const png = await toPng(file); const apiImage = await toApiImage(png); images.push({ content: await dataUrl(apiImage), mimeType: apiImage.type }); try { const thumb = await thumbnailDataUrl(png); if (thumb) captured.push({ id: newId('photo'), name: file.name, dataUrl: thumb, createdAt: new Date().toISOString(), kind: 'memory' }); } catch { /* 写真保存に失敗しても解析は続行 */ } } assertApiImageSize(images); if (captured.length) savePhotos([...photos, ...captured]); const response = await fetch('/api/parse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: activeProvider, mode: 'memorize', images }) }); const payload = await readApiResponse<{ cards?: Array<{ front?: string; back?: string; subject?: string }>; error?: string }>(response); if (!response.ok) throw new Error(payload.error ?? '解析に失敗しました'); if (activeProvider === 'api') recordApiUsage(files.length); const parsed = (payload.cards ?? []).map(item => ({ id: newId('vocab'), term: String(item.front ?? ''), meaning: String(item.back ?? ''), subject: String(item.subject ?? 'その他') })).filter(item => item.term && item.meaning); if (!parsed.length) throw new Error('暗記項目を見つけられませんでした'); const merged = mergeVocab(vocab, parsed); const added = merged.length - vocab.length; saveVocab(merged); setDeck(parsed[0].subject); setMemoryMessage(added ? `${added}件を${parsed[0].subject}の暗記ページに追加しました！` : '読み取ったカードはすべて登録済みでした。'); } catch (error) { setMemoryMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setMemoryReading(false); }
+    const files = Array.from(event.target.files ?? []); event.target.value = '';
+    if (!files.length) return;
+    if (files.some(file => file.size > MAX_UPLOAD_BYTES)) { setMemoryMessage('写真は1枚12MB以下にしてください。'); return; }
+    if (activeProvider === 'api' && activeApiCount + files.length > apiLimit) { setMemoryMessage(`今月の写真解析枠（${apiLimit}枚）を超えるため停止しました。残り${apiRemaining}枚です。`); setBillingOpen(!premiumActive); return; }
+    setMemoryFileName(files.length === 1 ? files[0].name : `${files.length}枚の写真`); setMemoryReading(true); setMemoryMessage('');
+    try {
+      const images: Array<{ content: string; mimeType: string }> = []; const captured: SavedPhoto[] = [];
+      for (const file of files) { const png = await toPng(file); const apiImage = await toApiImage(png); images.push({ content: await dataUrl(apiImage), mimeType: apiImage.type }); try { const thumb = await thumbnailDataUrl(png); if (thumb) captured.push({ id: newId('photo'), name: file.name, dataUrl: thumb, createdAt: new Date().toISOString(), kind: 'memory' }); } catch { /* 写真保存に失敗しても解析は続行 */ } }
+      assertApiImageSize(images); if (captured.length) savePhotos([...photos, ...captured]);
+      const headers: HeadersInit = { 'content-type': 'application/json' }; if (authSession?.access_token) headers.Authorization = `Bearer ${authSession.access_token}`;
+      const response = await fetch('/api/parse', { method: 'POST', headers, body: JSON.stringify({ provider: activeProvider, mode: 'memorize', images }) });
+      const payload = await readApiResponse<{ cards?: Array<{ front?: string; back?: string; subject?: string }>; error?: string }>(response); if (!response.ok) throw new Error(payload.error ?? '解析に失敗しました');
+      if (activeProvider === 'api') recordApiUsage(files.length);
+      const parsed = (payload.cards ?? []).map(item => ({ id: newId('vocab'), term: String(item.front ?? ''), meaning: String(item.back ?? ''), subject: String(item.subject ?? 'その他') })).filter(item => item.term && item.meaning);
+      if (!parsed.length) throw new Error('暗記項目を見つけられませんでした'); const merged = mergeVocab(vocab, parsed); const added = merged.length - vocab.length; saveVocab(merged); setDeck(parsed[0].subject); setMemoryMessage(added ? `${added}件を${parsed[0].subject}の暗記ページに追加しました！` : '読み取ったカードはすべて登録済みでした。');
+    } catch (error) { setMemoryMessage(error instanceof Error ? error.message : '読み取れませんでした'); } finally { setMemoryReading(false); }
   }
   function updateDraft(index: number, field: keyof Task, value: string) { setDraftTasks(current => current.map((item, i) => i === index ? { ...item, [field]: value } : item)); }
   function saveDraft() { const validTasks = draftTasks.filter(task => task.title.trim()); if (!validTasks.length) { setMessage('課題名を1件以上入力してください。'); return; } const merged = mergeTasks(tasks, validTasks); const added = merged.length - tasks.length; saveTasks(merged); setDraftTasks([]); setFileName(''); setMessage(added ? `${added}件の課題を保存しました！` : '読み取った課題はすべて登録済みでした。'); setScreen('home'); }

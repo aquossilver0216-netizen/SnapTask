@@ -18,7 +18,14 @@ export async function GET(request: Request) {
   if (!supabaseUrl || !supabaseAnonKey || !authorization?.startsWith('Bearer ')) return NextResponse.json({ active: false });
   const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, { headers: { apikey: supabaseAnonKey, Authorization: authorization } });
   if (!userResponse.ok) return NextResponse.json({ active: false });
-  const user = await userResponse.json() as { email?: unknown };
+  const user = await userResponse.json() as { id?: unknown; email?: unknown };
+  if (typeof user.id === 'string') {
+    const subscriptionResponse = await fetch(`${supabaseUrl}/rest/v1/snaptask_subscriptions?select=status&user_id=eq.${encodeURIComponent(user.id)}&limit=1`, { headers: { apikey: supabaseAnonKey, Authorization: authorization } });
+    if (subscriptionResponse.ok) {
+      const rows = await subscriptionResponse.json() as Array<{ status?: string }>;
+      if (rows.length) return NextResponse.json({ active: rows[0].status === 'active' || rows[0].status === 'trialing' });
+    }
+  }
   if (typeof user.email !== 'string' || !user.email) return NextResponse.json({ active: false });
   const email = user.email;
   try {
