@@ -9,6 +9,7 @@ type Input = { provider?: Provider; mode?: 'tasks' | 'memorize'; images?: Array<
 const defaultGeminiModel = 'gemini-3.6-flash';
 const prompt = `高校生向けのプリント・黒板写真を、提出物の一覧に変換してください。複数画像は同じプリントの続きとしてまとめて読み、画像に書かれている内容だけを使ってください。推測で補完したり、課題ではない説明文・ページ番号だけを課題にしたりしないでください。写真内の表や箇条書きは行ごとの対応を保ち、同じ課題を重複させないでください。JSONだけを返してください（Markdownや前置きは禁止）。\n{"tasks":[{"title":"写真に書かれた課題名","subject":"教科名","dueDate":"YYYY-MM-DDまたは空文字","body":"写真に書かれた提出物・やることの要約"}]}\n課題は見つかった分を漏れなく抽出してください。締切が明記されていない場合はdueDateを空文字にし、日付を勝手に作らないでください。日付が「8/30」「8月30日」のように年なしの場合は現在年を使ってください。`;
 const memorizePrompt = `学校の教材写真を、復習できる暗記カードに変換してください。複数画像は同じ教材の続きとしてまとめて読み、写真にある文字をできるだけ正確に転記してください。英単語の綴り、記号、数式、年号、固有名詞を変更しないでください。左右の列や表の行は正しい意味同士を組み合わせ、見出しだけ・ページ番号だけのカードは作らないでください。教科は写真の内容から判断し、判断できなければ「その他」にしてください。推測や一般知識で補完せず、JSONだけを返してください（Markdownや前置きは禁止）。\n{"cards":[{"front":"覚える語句・問題・公式","back":"写真に書かれた答え・説明・意味","subject":"英語 / 数学 / 理科 / 社会 / 国語 / その他"}]}\n写真にある重要事項を1行1カードで漏れなく抽出し、同じカードは重複させないでください。`;
+const memorizeBoldFocus = `太字・太字に見える語句、色付き文字、下線、見出し、囲み、重要語句を最優先でカード化してください。太字や重要語句が本文中にある場合は、その語句をfrontにし、同じ行・段落の定義や説明をbackにしてください。太字と通常文が同じ行にある場合も、太字の語句を省略しないでください。太字が判別できない場合は、文字の大きさ・色・囲み・見出しなどから重要語句を判断してください。`;
 
 function parseJson(text: string): Record<string, unknown> | null {
   const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
@@ -209,7 +210,7 @@ export async function POST(request: Request) {
   if (images.some(image => image.content.length > 12_000_000)) return NextResponse.json({ error: '写真のサイズが大きすぎます。1枚12MB以下にしてください。' }, { status: 413 });
   const provider = body.provider === 'api' ? 'api' : 'gemma';
   const mode = body.mode === 'memorize' ? 'memorize' : 'tasks';
-  const instruction = mode === 'memorize' ? memorizePrompt : prompt;
+  const instruction = mode === 'memorize' ? `${memorizePrompt}\n${memorizeBoldFocus}` : prompt;
   try {
     const tasks: unknown[] = [];
     if (provider === 'api') {
