@@ -6,6 +6,15 @@ export type AuthSession = {
   user: { id: string; email?: string; user_metadata?: Record<string, unknown> };
 };
 
+export type RemotePhoto = {
+  id: string;
+  name: string;
+  kind: 'task' | 'memory';
+  createdAt: string;
+  storagePath: string;
+  remoteUrl?: string;
+};
+
 type SupabaseAuthResponse = { access_token?: string; refresh_token?: string; expires_in?: number; user?: AuthSession['user']; error_description?: string; msg?: string; message?: string };
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, '');
@@ -61,4 +70,41 @@ export async function saveRemoteData(session: AuthSession, payload: unknown) {
   const config = requireConfig();
   const response = await fetch(`${config.url}/rest/v1/snaptask_data?on_conflict=user_id`, { method: 'POST', headers: { apikey: config.key, Authorization: `Bearer ${session.access_token}`, 'content-type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: session.user.id, payload, updated_at: new Date().toISOString() }) });
   if (!response.ok) throw new Error('クラウドデータを保存できませんでした。');
+}
+
+const photoBucket = 'snaptask-photos';
+
+function storagePathUrl(url: string, path: string) {
+  return `${url}/storage/v1/object/${photoBucket}/${path.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+export async function uploadRemotePhoto(session: AuthSession, storagePath: string, file: Blob) {
+  const config = requireConfig();
+  const response = await fetch(storagePathUrl(config.url, storagePath), {
+    method: 'POST',
+    headers: { apikey: config.key, Authorization: `Bearer ${session.access_token}`, 'content-type': file.type || 'image/png', 'x-upsert': 'true' },
+    body: file,
+  });
+  if (!response.ok) throw new Error('写真をクラウドに保存できませんでした。');
+  return storagePath;
+}
+
+export async function createRemotePhotoUrl(session: AuthSession, storagePath: string, expiresIn = 60 * 60 * 24 * 7) {
+  const config = requireConfig();
+  const response = await fetch(`${config.url}/storage/v1/object/sign/${photoBucket}/${storagePath.split('/').map(encodeURIComponent).join('/')}`, {
+    method: 'POST',
+    headers: { apikey: config.key, Authorization: `Bearer ${session.access_token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ expiresIn }),
+  });
+  if (!response.ok) throw new Error('写真の表示URLを作成できませんでした。');
+  const payload = await response.json() as { signedURL?: string };
+  if (!payload.signedURL) throw new Error('写真の表示URLを受け取れませんでした。');
+  return new URL(payload.signedURL, `${config.url}/storage/v1`).toString();
+}
+
+export async function hydrateRemotePhotoUrls(session: AuthSession, photos: RemotePhoto[]) {
+  return Promise.all(photos.map(async photo => {
+    try { return { ...photo, remoteUrl: await createRemotePhotoUrl(session, photo.storagePath) }; }
+    catch { return photo; }
+  }));
 }

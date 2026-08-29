@@ -62,3 +62,27 @@ create policy "users read own photos" on public.snaptask_photos for select using
 create policy "users insert own photos" on public.snaptask_photos for insert with check (auth.uid() = user_id);
 create policy "users update own photos" on public.snaptask_photos for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "users delete own photos" on public.snaptask_photos for delete using (auth.uid() = user_id);
+
+-- 写真原本はStorageの非公開バケットへ保存します。アプリからはログイン中の本人だけが読めます。
+insert into storage.buckets (id, name, public)
+values ('snaptask-photos', 'snaptask-photos', false)
+on conflict (id) do update set public = false;
+
+drop policy if exists "users read own snaptask photos" on storage.objects;
+drop policy if exists "users upload own snaptask photos" on storage.objects;
+drop policy if exists "users update own snaptask photos" on storage.objects;
+drop policy if exists "users delete own snaptask photos" on storage.objects;
+
+create policy "users read own snaptask photos" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'snaptask-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "users upload own snaptask photos" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'snaptask-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "users update own snaptask photos" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'snaptask-photos' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'snaptask-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "users delete own snaptask photos" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'snaptask-photos' and (storage.foldername(name))[1] = auth.uid()::text);

@@ -35,9 +35,9 @@ create policy "users insert own data" on public.snaptask_data for insert with ch
 create policy "users update own data" on public.snaptask_data for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 ```
 
-写真のサムネイルは端末容量とプライバシーを守るためlocalStorageに残し、学習データ（課題・カード・記録）をクラウド同期します。
+ログイン中に追加した写真は、変換済みPNGの原本をSupabase Storageの非公開バケットへ保存します。画面には署名付きURLで表示し、未ログイン時は端末内だけに保存します。Storageを有効にするには、付属の `supabase/schema.sql` に含まれるバケット作成・RLS部分もSQL Editorで実行してください。
 
-Stripe Checkoutはログイン中のSupabaseユーザーをサーバー側で検証してから決済セッションへ紐づけます。`STRIPE_SECRET_KEY`、Price IDなどのStripe環境変数がVercelに設定されていれば、ログイン後の契約状況もアカウントごとに確認できます。返金・解約を反映するには、StripeのDevelopers → Webhooksで `https://snap-task-xi.vercel.app/api/billing/webhook` を登録し、`checkout.session.completed`、`customer.subscription.created`、`customer.subscription.updated`、`customer.subscription.deleted`を購読、Signing secretをVercelの `STRIPE_WEBHOOK_SECRET`へ保存してください。
+Stripe Checkoutはログイン中のSupabaseユーザーをサーバー側で検証してから決済セッションへ紐づけます。`STRIPE_SECRET_KEY`、Price IDなどのStripe環境変数がVercelに設定されていれば、ログイン後の契約状況もアカウントごとに確認できます。返金・解約を反映するには、StripeのDevelopers → Webhooksで `https://snap-task-xi.vercel.app/api/billing/webhook` を登録し、`checkout.session.completed`、`customer.subscription.created`、`customer.subscription.updated`、`customer.subscription.deleted`、`charge.refunded`を購読、Signing secretをVercelの `STRIPE_WEBHOOK_SECRET`へ保存してください。返金イベントは顧客IDから契約ユーザーを照合し、プレミアムを停止します。
 
 サーバー側のAPI枚数制限とStripe Webhookの書き込みには、Supabaseの `service_role`（またはsecret）キーをVercelの `SUPABASE_SERVICE_ROLE_KEY`へ登録します。これはサーバー専用で、`NEXT_PUBLIC_`を付けたり、画面やGitHubへ公開したりしないでください。API制限はログインユーザーごとに月20枚（契約中は300枚）で停止します。
 
