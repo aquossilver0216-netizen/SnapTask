@@ -41,7 +41,9 @@ function toSession(payload: SupabaseAuthResponse): AuthSession {
 }
 
 export async function signUp(email: string, password: string, displayName: string) {
-  return toSession(await authRequest('signup', { email, password, data: { display_name: displayName } }));
+  const payload = await authRequest('signup', { email, password, data: { display_name: displayName } });
+  // Confirm emailが有効なプロジェクトでは、確認メール送信後にsessionが返らない。
+  return payload.access_token ? toSession(payload) : null;
 }
 
 export async function signIn(email: string, password: string) {

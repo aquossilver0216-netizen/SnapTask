@@ -79,6 +79,13 @@ function deckArtPath(subject: string) {
 function encodeShareData(value: string) { const bytes = new TextEncoder().encode(value); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, ''); }
 function decodeShareData(value: string) { const normalized = value.replaceAll('-', '+').replaceAll('_', '/'); const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4); const binary = atob(padded); return new TextDecoder().decode(Uint8Array.from(binary, char => char.charCodeAt(0))); }
 function readPremiumActive() { try { return typeof window !== 'undefined' && localStorage.getItem(PREMIUM_STORAGE_KEY) === '1'; } catch { return false; } }
+function authErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (/email address .*invalid|invalid email/i.test(message)) return 'メールアドレスを確認してね。半角英数字で、空白なしで入力してください。';
+  if (/not authorized|メール.*送信/i.test(message)) return '確認メールを送れませんでした。Supabaseのメール設定を確認してください。';
+  if (/already registered|user already/i.test(message)) return 'このメールアドレスは登録済みです。「ログイン」に切り替えてね。';
+  return message || '認証に失敗しました。';
+}
 
 async function toPng(file: File): Promise<File> {
   let source: Blob = file;
@@ -401,11 +408,12 @@ export default function Home() {
     if (authMode === 'signup' && !displayName) { setAuthMessage('表示名を入力してね。'); setAuthBusy(false); return; }
     try {
       const next = authMode === 'signup' ? await signUp(email, password, displayName) : await signIn(email, password);
+      if (!next) { setAuthPassword(''); setAuthMessage('確認メールを送信しました。メール内のリンクを開いてからログインしてね。'); return; }
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(next));
       const nextProfile: UserProfile = { id: next.user.id, displayName: displayName || String(next.user.user_metadata?.display_name ?? email.split('@')[0]), email, createdAt: profile?.createdAt ?? new Date().toISOString() };
       setProfile(nextProfile); localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(nextProfile)); setProfileName(nextProfile.displayName); setProfileEmail(email); setAuthPassword('');
       await hydrateRemoteSession(next); setAuthMessage(authMode === 'signup' ? 'アカウントを作成しました。' : 'ログインしました。');
-    } catch (error) { setAuthMessage(error instanceof Error ? error.message : '認証に失敗しました。'); }
+    } catch (error) { setAuthMessage(authErrorMessage(error)); }
     finally { setAuthBusy(false); }
   }
 
