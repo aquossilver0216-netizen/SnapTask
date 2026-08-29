@@ -234,6 +234,7 @@ export default function Home() {
     authSessionRef.current = session;
     setAuthSession(session);
     if (session.user.email) setProfileEmail(session.user.email);
+    void fetch('/api/billing/status', { headers: { Authorization: `Bearer ${session.access_token}` } }).then(response => response.ok ? response.json() as Promise<{ active?: boolean }> : null).then(result => { if (result?.active) { setPremiumActive(true); localStorage.setItem(PREMIUM_STORAGE_KEY, '1'); } }).catch(() => { /* 契約確認に失敗しても学習同期は続ける */ });
     try {
       const remote = await fetchRemoteData(session);
       const data = recordOf(remote);
