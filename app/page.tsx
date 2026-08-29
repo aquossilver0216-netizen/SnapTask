@@ -83,6 +83,8 @@ function authErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : '';
   if (/email address .*invalid|invalid email/i.test(message)) return 'メールアドレスを確認してね。半角英数字で、空白なしで入力してください。';
   if (/rate limit exceeded|email.*rate.?limit|over_email_send_rate_limit|too many requests/i.test(message)) return '確認メールの送信上限に達しました。しばらく待ってから再試行してね。登録済みなら「ログイン」を使ってください。';
+  if (/email not confirmed|email_not_confirmed/i.test(message)) return '確認メールのリンクを開いてからログインしてね。メールが届かない場合は迷惑メールも確認してください。';
+  if (/invalid login credentials|invalid.*credentials|invalid password/i.test(message)) return 'メールアドレスまたはパスワードが違います。確認メールのリンクを開いたか、入力内容を確認してね。';
   if (/not authorized|メール.*送信/i.test(message)) return '確認メールを送れませんでした。Supabaseのメール設定を確認してください。';
   if (/already registered|user already/i.test(message)) return 'このメールアドレスは登録済みです。「ログイン」に切り替えてね。';
   return message || '認証に失敗しました。';
