@@ -99,7 +99,7 @@ export async function createRemotePhotoUrl(session: AuthSession, storagePath: st
   if (!response.ok) throw new Error('写真の表示URLを作成できませんでした。');
   const payload = await response.json() as { signedURL?: string };
   if (!payload.signedURL) throw new Error('写真の表示URLを受け取れませんでした。');
-  return new URL(payload.signedURL, `${config.url}/storage/v1`).toString();
+  return /^https?:\/\//i.test(payload.signedURL) ? payload.signedURL : `${config.url}/storage/v1${payload.signedURL.startsWith('/') ? '' : '/'}${payload.signedURL}`;
 }
 
 export async function hydrateRemotePhotoUrls(session: AuthSession, photos: RemotePhoto[]) {
