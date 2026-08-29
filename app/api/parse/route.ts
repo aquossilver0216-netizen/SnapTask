@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 
+// Geminiの画像解析は通常のページ処理より時間がかかるため、Vercel側にも上限を伝える。
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 type Provider = 'gemma' | 'api';
 type Input = { provider?: Provider; mode?: 'tasks' | 'memorize'; images?: Array<{ content?: string; mimeType?: string }> };
 const defaultGeminiModel = 'gemini-3.6-flash';
