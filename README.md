@@ -37,6 +37,8 @@ create policy "users update own data" on public.snaptask_data for update using (
 
 写真のサムネイルは端末容量とプライバシーを守るためlocalStorageに残し、学習データ（課題・カード・記録）をクラウド同期します。
 
+Stripe Checkoutはログイン中のSupabaseユーザーをサーバー側で検証してから決済セッションへ紐づけます。`STRIPE_SECRET_KEY`、Price IDなどのStripe環境変数がVercelに設定されていれば、ログイン後の契約状況もアカウントごとに確認できます。
+
 ホームの「チュートリアル」では、写真の追加、読み取り結果の確認、学習記録、ミス復習・共有の流れを4ステップで確認できます。途中のステップへ戻ることもできます。
 
 提出前の公開・デモ・AI設定チェックは [`docs/submission-checklist.md`](docs/submission-checklist.md) を確認してください。
