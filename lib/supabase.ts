@@ -50,6 +50,28 @@ export async function signIn(email: string, password: string) {
   return toSession(await authRequest('token?grant_type=password', { email, password }));
 }
 
+export function startGoogleSignIn() {
+  const config = requireConfig();
+  if (typeof window === 'undefined') throw new Error('Googleログインはブラウザから開始してください。');
+  const redirectTo = window.location.origin;
+  window.location.assign(`${config.url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`);
+}
+
+export async function readGoogleSessionFromUrl() {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const accessToken = params.get('access_token');
+  if (!accessToken) return null;
+  const config = requireConfig();
+  const response = await fetch(`${config.url}/auth/v1/user`, { headers: { apikey: config.key, Authorization: `Bearer ${accessToken}` } });
+  const payload = await response.json().catch(() => ({})) as { id?: string; email?: string; user_metadata?: Record<string, unknown>; message?: string };
+  if (!response.ok || !payload.id) throw new Error(payload.message ?? 'Googleログイン情報を受け取れませんでした。');
+  const expiresIn = Number(params.get('expires_in') ?? 3600);
+  const expiresAt = Number(params.get('expires_at')) || Math.floor(Date.now() / 1000) + expiresIn;
+  window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+  return { access_token: accessToken, refresh_token: params.get('refresh_token') ?? undefined, expires_in: expiresIn, expires_at: expiresAt, user: { id: payload.id, email: payload.email, user_metadata: payload.user_metadata } } satisfies AuthSession;
+}
+
 export async function refreshSession(refreshToken: string) {
   return toSession(await authRequest('token?grant_type=refresh_token', { refresh_token: refreshToken }));
 }
