@@ -24,7 +24,7 @@ pnpm test:smoke http://localhost:3000
 | 変数 | 公開環境の値 |
 | --- | --- |
 | `GEMINI_API_KEY` | Google AI Studioで発行したキー |
-| `GEMINI_MODEL` | `gemini-2.5-flash`（必要に応じて変更） |
+| `GEMINI_MODEL` | `gemini-3.6-flash`（必要に応じて変更） |
 
 `LOCAL_GEMMA_BASE_URL`は公開サーバーから開発Macへ接続できないため、公開環境には設定しません。公開版の写真解析は画面で「Gemini API」を選びます。Gemmaは開発・オフラインデモ用です。`GEMINI_API_KEY`が設定された公開環境では、初回表示時にGemini APIが自動選択されます。写真は1枚12MB以下・最大12枚です。
 

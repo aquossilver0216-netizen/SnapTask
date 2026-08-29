@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 type Provider = 'gemma' | 'api';
 type Input = { provider?: Provider; mode?: 'tasks' | 'memorize'; images?: Array<{ content?: string; mimeType?: string }> };
+const defaultGeminiModel = 'gemini-3.6-flash';
 const prompt = `高校生向けのプリント・黒板写真を、提出物の一覧に変換してください。複数画像は同じプリントの続きとしてまとめて読み、画像に書かれている内容だけを使ってください。推測で補完したり、課題ではない説明文・ページ番号だけを課題にしたりしないでください。写真内の表や箇条書きは行ごとの対応を保ち、同じ課題を重複させないでください。JSONだけを返してください（Markdownや前置きは禁止）。\n{"tasks":[{"title":"写真に書かれた課題名","subject":"教科名","dueDate":"YYYY-MM-DDまたは空文字","body":"写真に書かれた提出物・やることの要約"}]}\n課題は見つかった分を漏れなく抽出してください。締切が明記されていない場合はdueDateを空文字にし、日付を勝手に作らないでください。日付が「8/30」「8月30日」のように年なしの場合は現在年を使ってください。`;
 const memorizePrompt = `学校の教材写真を、復習できる暗記カードに変換してください。複数画像は同じ教材の続きとしてまとめて読み、写真にある文字をできるだけ正確に転記してください。英単語の綴り、記号、数式、年号、固有名詞を変更しないでください。左右の列や表の行は正しい意味同士を組み合わせ、見出しだけ・ページ番号だけのカードは作らないでください。教科は写真の内容から判断し、判断できなければ「その他」にしてください。推測や一般知識で補完せず、JSONだけを返してください（Markdownや前置きは禁止）。\n{"cards":[{"front":"覚える語句・問題・公式","back":"写真に書かれた答え・説明・意味","subject":"英語 / 数学 / 理科 / 社会 / 国語 / その他"}]}\n写真にある重要事項を1行1カードで漏れなく抽出し、同じカードは重複させないでください。`;
 
@@ -95,6 +96,23 @@ function gemmaErrorMessage(error: unknown): string {
   return 'Gemmaに接続できませんでした。Bionic / LM Studioで http://127.0.0.1:1234/v1 を起動してください。';
 }
 
+function geminiErrorMessage(error: unknown): string {
+  const reason = error instanceof Error ? error.message : String(error);
+  if (/no longer available|not found|NOT_FOUND|404/i.test(reason)) {
+    return 'Geminiのモデルが利用できません。VercelのGEMINI_MODELをgemini-3.6-flashに変更してね。';
+  }
+  if (/quota|resource_exhausted|rate.?limit|429/i.test(reason)) {
+    return 'Gemini APIの無料枠を使い切りました。Google AI Studioの上限がリセットされるまで待つか、Gemmaモードを使ってね。';
+  }
+  if (/api key|api_key|unauthenticated|unauthorized|invalid.*key|401/i.test(reason)) {
+    return 'Gemini APIキーが正しくありません。VercelのGEMINI_API_KEYを確認してね。';
+  }
+  if (/invalid argument|unsupported|image|400/i.test(reason)) {
+    return 'Geminiがこの画像を解析できませんでした。写真を明るく撮り直すか、1〜2枚ずつ試してね。';
+  }
+  return 'Gemini APIで解析できませんでした。しばらくしてからもう一度試してね。';
+}
+
 function normalizeImageMimeType(value: unknown) {
   const mime = typeof value === 'string' ? value.toLowerCase() : '';
   if (mime === 'image/jpg') return 'image/jpeg';
@@ -112,6 +130,23 @@ async function callVision(url: string, model: string, images: Array<{ content: s
 }
 
 const defaultLocalModel = 'google/gemma-4-e4b';
+
+function normalizeGeminiModel(value: string | undefined) {
+  return (value ?? '').trim().replace(/^models\//, '') || defaultGeminiModel;
+}
+
+async function callGemini(key: string, requestedModel: string, parts: Array<Record<string, unknown>>) {
+  const models = Array.from(new Set([normalizeGeminiModel(requestedModel), defaultGeminiModel]));
+  let lastError = '';
+  for (const model of models) {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } }), signal: AbortSignal.timeout(45_000) });
+    if (response.ok) return await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    lastError = await response.text();
+    const canTryLatest = response.status === 404 && model !== defaultGeminiModel && /no longer available|not found|NOT_FOUND/i.test(lastError);
+    if (!canTryLatest) throw new Error(lastError);
+  }
+  throw new Error(lastError || 'Gemini model request failed');
+}
 
 async function resolveLocalModel(base: string): Promise<string> {
   const configured = process.env.LOCAL_GEMMA_MODEL?.trim();
@@ -145,11 +180,9 @@ export async function POST(request: Request) {
     if (provider === 'api') {
       const key = process.env.GEMINI_API_KEY;
       if (!key) return NextResponse.json({ error: 'GEMINI_API_KEYが未設定です' }, { status: 503 });
-      const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+      const model = normalizeGeminiModel(process.env.GEMINI_MODEL);
       const parts = [{ text: instruction }, ...images.map(image => ({ inline_data: { mime_type: image.mimeType, data: image.content } }))];
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } }), signal: AbortSignal.timeout(45_000) });
-      if (!response.ok) throw new Error(await response.text());
-      const result = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+      const result = await callGemini(key, model, parts);
       const parsed = parseJson(result.candidates?.[0]?.content?.parts?.[0]?.text ?? '');
       tasks.push(...(mode === 'memorize' ? cleanCards(parsed?.cards ?? parsed?.items ?? parsed?.vocab ?? parsed?.flashcards) : cleanTasks(parsed?.tasks ?? parsed?.assignments ?? parsed?.items)));
     } else {
@@ -162,7 +195,7 @@ export async function POST(request: Request) {
     if (mode === 'memorize') { const unique = new Map<string, { front: string; back: string; subject: string }>(); for (const card of cleanCards(tasks)) unique.set(`${card.front}|${card.subject}`.toLowerCase(), card); return NextResponse.json({ cards: Array.from(unique.values()) }); }
     const unique = new Map<string, { title: string; subject: string; dueDate: string; body: string }>(); for (const task of cleanTasks(tasks)) unique.set(`${task.title}|${task.subject}`.toLowerCase(), task);
     return NextResponse.json({ tasks: Array.from(unique.values()) });
-  } catch (error) { console.error('SnapTask AI parse failed', { provider, mode, reason: error instanceof Error ? error.message.slice(0, 400) : 'unknown' }); return NextResponse.json({ error: provider === 'gemma' ? gemmaErrorMessage(error) : 'APIで解析できませんでした。GEMINI_API_KEYとモデル設定を確認してください。' }, { status: 503 }); }
+  } catch (error) { console.error('SnapTask AI parse failed', { provider, mode, reason: error instanceof Error ? error.message.slice(0, 400) : 'unknown' }); return NextResponse.json({ error: provider === 'gemma' ? gemmaErrorMessage(error) : geminiErrorMessage(error) }, { status: 503 }); }
 }
 
 // 公開後の接続確認用。秘密情報やキーの値は返さない。
@@ -182,6 +215,6 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ok: true,
     providers: { gemma: true, api: Boolean(process.env.GEMINI_API_KEY) },
-    model: { gemma: process.env.LOCAL_GEMMA_MODEL || defaultLocalModel, api: process.env.GEMINI_MODEL || 'gemini-2.5-flash' },
+    model: { gemma: process.env.LOCAL_GEMMA_MODEL || defaultLocalModel, api: normalizeGeminiModel(process.env.GEMINI_MODEL) },
   });
 }
