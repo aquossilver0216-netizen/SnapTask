@@ -18,9 +18,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: liveMode ? '本番モードにはStripeのsk_live_キーを設定してください。' : '現在はテストモードです。Stripeのsk_test_キーを設定してください。' }, { status: 503 });
   }
 
-  const body = await request.json().catch(() => ({})) as { userId?: unknown; email?: unknown };
-  const userId = typeof body.userId === 'string' && /^[0-9a-f-]{20,}$/i.test(body.userId) ? body.userId : '';
-  const email = typeof body.email === 'string' && /^\S+@\S+\.\S+$/.test(body.email) ? body.email : '';
+  const body = await request.json().catch(() => ({})) as { email?: unknown };
+  let userId = '';
+  let verifiedEmail = '';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, '');
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const authorization = request.headers.get('authorization');
+  if (supabaseUrl && supabaseAnonKey && authorization?.startsWith('Bearer ')) {
+    const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, { headers: { apikey: supabaseAnonKey, Authorization: authorization } });
+    if (userResponse.ok) {
+      const user = await userResponse.json() as { id?: unknown; email?: unknown };
+      if (typeof user.id === 'string' && /^[0-9a-f-]{20,}$/i.test(user.id)) userId = user.id;
+      if (typeof user.email === 'string') verifiedEmail = user.email;
+    }
+  }
+  const email = verifiedEmail || (typeof body.email === 'string' && /^\S+@\S+\.\S+$/.test(body.email) ? body.email : '');
 
   const params = new URLSearchParams({
     mode: 'subscription',

@@ -383,7 +383,8 @@ export default function Home() {
   async function startCheckout() {
     setBillingLoading(true); setBillingError('');
     try {
-      const response = await fetch('/api/billing/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plan: 'premium', userId: authSession?.user.id, email: authSession?.user.email ?? profileEmail }) });
+      const headers: HeadersInit = { 'content-type': 'application/json' }; if (authSession?.access_token) headers.Authorization = `Bearer ${authSession.access_token}`;
+      const response = await fetch('/api/billing/checkout', { method: 'POST', headers, body: JSON.stringify({ plan: 'premium', email: authSession?.user.email ?? profileEmail }) });
       const data = await response.json() as { url?: string; error?: string };
       if (!response.ok || !data.url) throw new Error(data.error ?? '決済設定が未完了です');
       window.location.href = data.url;
