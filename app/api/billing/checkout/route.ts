@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
  * Stripe Checkoutの接続口。
  * 秘密鍵・価格IDを設定するまでは決済を開始せず、安全に設定不足を返します。
  */
-export async function POST() {
+export async function POST(request: Request) {
   const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
   const liveMode = process.env.STRIPE_TEST_MODE === 'false';
   // 本番とテストでPrice IDも分離し、環境をまたいだ設定ミスを防ぐ。
@@ -18,6 +18,10 @@ export async function POST() {
     return NextResponse.json({ error: liveMode ? '本番モードにはStripeのsk_live_キーを設定してください。' : '現在はテストモードです。Stripeのsk_test_キーを設定してください。' }, { status: 503 });
   }
 
+  const body = await request.json().catch(() => ({})) as { userId?: unknown; email?: unknown };
+  const userId = typeof body.userId === 'string' && /^[0-9a-f-]{20,}$/i.test(body.userId) ? body.userId : '';
+  const email = typeof body.email === 'string' && /^\S+@\S+\.\S+$/.test(body.email) ? body.email : '';
+
   const params = new URLSearchParams({
     mode: 'subscription',
     'line_items[0][price]': priceId,
@@ -26,6 +30,8 @@ export async function POST() {
     cancel_url: `${appUrl}/?checkout=cancelled`,
     'subscription_data[metadata][product]': 'snaptask-premium',
   });
+  if (userId) { params.set('client_reference_id', userId); params.set('subscription_data[metadata][user_id]', userId); }
+  if (email) params.set('customer_email', email);
   const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${secretKey}`, 'Content-Type': 'application/x-www-form-urlencoded' },

@@ -19,6 +19,24 @@ Gemini APIの写真解析は、予想外の費用を防ぐためこのMVPでは1
 
 課題と単語帳は端末のlocalStorageに保存されます。あとで大会向けにGeminiへ切り替える場合も、画面の選択とサーバー側ルートはそのまま使えます。
 
+### 本番ログイン・端末間同期（Supabase）
+
+Supabaseを接続すると、アカウント画面からメール登録・ログイン・ログアウトができ、課題・暗記カード・学習記録が端末間で同期されます。SupabaseのSQL Editorで次を一度だけ実行し、VercelのProduction環境変数に `NEXT_PUBLIC_SUPABASE_URL`（Project URL）と `NEXT_PUBLIC_SUPABASE_ANON_KEY`（anon public key）を登録して再デプロイしてください。`service_role`キーは登録しないでください。
+
+```sql
+create table public.snaptask_data (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  payload jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+alter table public.snaptask_data enable row level security;
+create policy "users read own data" on public.snaptask_data for select using (auth.uid() = user_id);
+create policy "users insert own data" on public.snaptask_data for insert with check (auth.uid() = user_id);
+create policy "users update own data" on public.snaptask_data for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+```
+
+写真のサムネイルは端末容量とプライバシーを守るためlocalStorageに残し、学習データ（課題・カード・記録）をクラウド同期します。
+
 ホームの「チュートリアル」では、写真の追加、読み取り結果の確認、学習記録、ミス復習・共有の流れを4ステップで確認できます。途中のステップへ戻ることもできます。
 
 提出前の公開・デモ・AI設定チェックは [`docs/submission-checklist.md`](docs/submission-checklist.md) を確認してください。
