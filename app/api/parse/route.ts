@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 type Provider = 'gemma' | 'api';
-type Input = { provider?: Provider; mode?: 'tasks' | 'memorize'; images?: Array<{ content?: string; mimeType?: string }> };
+type Input = { provider?: Provider; mode?: 'tasks' | 'memorize'; instruction?: string; images?: Array<{ content?: string; mimeType?: string }> };
 type QuotaResult = { userId: string; month: string; count: number; limit: number };
 const defaultGeminiModel = 'gemini-3.6-flash';
 const prompt = `高校生向けのプリント・黒板写真を、提出物の一覧に変換してください。複数画像は同じプリントの続きとしてまとめて読み、画像に書かれている内容だけを使ってください。推測で補完したり、課題ではない説明文・ページ番号だけを課題にしたりしないでください。写真内の表や箇条書きは行ごとの対応を保ち、同じ課題を重複させないでください。JSONだけを返してください（Markdownや前置きは禁止）。\n{"tasks":[{"title":"写真に書かれた課題名","subject":"教科名","dueDate":"YYYY-MM-DDまたは空文字","body":"写真に書かれた提出物・やることの要約"}]}\n課題は見つかった分を漏れなく抽出してください。締切が明記されていない場合はdueDateを空文字にし、日付を勝手に作らないでください。日付が「8/30」「8月30日」のように年なしの場合は現在年を使ってください。`;
@@ -237,7 +237,8 @@ export async function POST(request: Request) {
   if (images.some(image => image.content.length > 12_000_000)) return NextResponse.json({ error: '写真のサイズが大きすぎます。1枚12MB以下にしてください。' }, { status: 413 });
   const provider = body.provider === 'api' ? 'api' : 'gemma';
   const mode = body.mode === 'memorize' ? 'memorize' : 'tasks';
-  const instruction = mode === 'memorize' ? `${memorizePrompt}\n${memorizeBoldFocus}` : prompt;
+  const userInstruction = typeof body.instruction === 'string' ? body.instruction.trim().slice(0, 1_000) : '';
+  const instruction = `${mode === 'memorize' ? `${memorizePrompt}\n${memorizeBoldFocus}` : prompt}${userInstruction ? `\n\nユーザーからの読み取り指示（この指示を優先。ただし写真にない内容は推測しない）：\n${userInstruction}` : ''}`;
   let quota: QuotaResult | null = null;
   try {
     const tasks: unknown[] = [];
