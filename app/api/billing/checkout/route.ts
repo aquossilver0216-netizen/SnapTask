@@ -42,6 +42,9 @@ export async function POST(request: Request) {
     cancel_url: `${appUrl}/?checkout=cancelled`,
     'metadata[product]': 'snaptask-premium',
     'subscription_data[metadata][product]': 'snaptask-premium',
+    // Stripe Checkoutにプロモーションコード入力欄を表示する。
+    // 審査用の100%オフコードも、同じ本番Checkoutから安全に適用できる。
+    allow_promotion_codes: 'true',
   });
   if (userId) { params.set('client_reference_id', userId); params.set('metadata[user_id]', userId); params.set('subscription_data[metadata][user_id]', userId); }
   if (email) params.set('customer_email', email);
